@@ -19,7 +19,7 @@
 // BATMan Protocol Commands (from original BatMan.cpp)
 #define CMD_WAKEUP      0x2AD4
 #define CMD_MUTE        0x20DD
-#define CMD_UNMUTE      0x21F2
+#define CMD_IDLE_WAKE   0x21F2  // Also called UNMUTE - makes IC responsive
 #define CMD_SNAPSHOT    0x2BFB
 #define CMD_READ_A      0x47    // Cells 0-2
 #define CMD_READ_B      0x48    // Cells 3-5
@@ -188,10 +188,11 @@ static void batman_send_command(uint16_t cmd_word) {
 }
 
 /**
- * @brief Send unmute command (IdleWake from BatMan.cpp)
+ * @brief Send idle wake command - makes IC responsive to commands
+ * Also known as UNMUTE in some documentation
  */
 static void batman_idle_wake(void) {
-    batman_send_command(CMD_UNMUTE);
+    batman_send_command(CMD_IDLE_WAKE);
 }
 
 /**
@@ -413,136 +414,84 @@ static void batman_update_cell_voltages(void) {
 }
 
 /**
+ * @brief Minimal test - restore original working sequence
+ */
+static void batman_simple_test(void) {
+    printf("\n=== MINIMAL TEST: Original Sequence (simplified) ===\n");
+    
+    // Step 1: Wake up the IC
+    printf("Step 1: Waking up IC...\n");
+    batman_wakeup();
+    sleep_ms(100);  // Wait after wakeup
+    
+    // Step 2: Send idle wake (makes IC responsive)
+    printf("Step 2: Sending idle wake...\n");
+    batman_idle_wake();
+    sleep_ms(100);
+    
+    // Step 3: First snapshot
+    printf("Step 3: Taking snapshot 1...\n");
+    batman_idle_wake();
+    sleep_us(125);
+    batman_send_command(CMD_SNAPSHOT);
+    sleep_us(125);
+    
+    // Step 4: Second snapshot (no ADC delay)
+    printf("Step 4: Taking snapshot 2...\n");
+    batman_idle_wake();
+    sleep_us(125);
+    batman_send_command(CMD_SNAPSHOT);
+    sleep_us(125);
+    
+    // Step 5: Read voltage register A (skip STATUS reads)
+    printf("Step 5: Reading cell voltages (Register A)...\n");
+    batman_idle_wake();
+    sleep_us(125);
+    
+    batman_get_data(CMD_READ_A);
+    
+    // Step 6: Parse and display first cell
+    printf("Step 6: Parsing first cell voltage...\n");
+    uint16_t tempvol = response_buffer[1] * 256 + response_buffer[0];
+    
+    printf("\n=== RESULTS ===\n");
+    printf("Raw bytes: [%02X %02X]\n", response_buffer[0], response_buffer[1]);
+    printf("Raw value: 0x%04X (%d decimal)\n", tempvol, tempvol);
+    
+    if (tempvol != 0xFFFF && tempvol != 0x0000) {
+        uint16_t voltage_mv = tempvol / 12.5;
+        printf("Cell 0 voltage: %d mV (%.3f V)\n", voltage_mv, voltage_mv / 1000.0f);
+        
+        // Store in voltage array
+        voltage_array[0][0] = voltage_mv;
+        
+        // Update parameter
+        param_set_float(PARAM_U1, (float)voltage_mv);
+        
+        printf("✓ SUCCESS - Cell 0 read complete!\n");
+    } else {
+        printf("✗ FAILED - Invalid voltage reading (0xFFFF or 0x0000)\n");
+    }
+    
+    printf("===============================================\n\n");
+}
+
+/**
  * @brief State machine based on original BatMan.cpp
  */
 static void batman_state_machine(void) {
-    const uint32_t send_delay_us = 125;  // 125 microseconds like original ESP32 code
-    
     switch (loop_state) {
-        case 0:  // Wake up BMBs
-            printf("\n=== BATMan State 0: WAKEUP ===\n");
-            batman_wakeup();
-            sleep_ms(100);  // Wait after wakeup
-            batman_idle_wake();
-            sleep_ms(100);  // Wait after unmute
-            
-            // Test read config to verify communication
-            printf("  Testing communication...\n");
-            batman_get_data(CMD_READ_CONFIG);
-            if (response_buffer[0] != 0xFF) {
-                printf("  ✓ Communication OK - got config data\n");
-            } else {
-                printf("  ✗ Communication FAILED - all FF\n");
-            }
-            
+        case 0:  // Run simple test once
+            batman_simple_test();
             loop_state++;
             break;
             
-        case 1:  // Read Aux A and Config
-            printf("\n=== BATMan State 1: READ AUX & CONFIG ===\n");
-            batman_idle_wake();
-            batman_get_data(CMD_READ_AUX_A);
-            batman_get_data(CMD_READ_CONFIG);
-            loop_state++;
-            break;
-            
-        case 2:  // Snapshot 1
-            printf("\n=== BATMan State 2: SNAPSHOT 1 ===\n");
-            batman_idle_wake();
-            sleep_us(send_delay_us);
-            batman_send_command(CMD_SNAPSHOT);
-            sleep_us(send_delay_us);  // Wait after first snapshot
-            loop_state++;
-            break;
-            
-        case 3:  // Snapshot 2 - wait for ADC conversion
-            printf("\n=== BATMan State 3: SNAPSHOT 2 ===\n");
-            batman_idle_wake();
-            sleep_us(send_delay_us);
-            batman_send_command(CMD_SNAPSHOT);
-            printf("  Waiting for ADC conversion (2 seconds)...\n");
-            sleep_ms(2000);  // Give ADC plenty of time to convert all cells
-            loop_state++;
-            break;
-            
-        case 4:  // Read voltage registers A-D
-            printf("\n=== BATMan State 4: READ VOLTAGES A-D ===\n");
-            batman_idle_wake();
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_STATUS);
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_STATUS);  // Read twice like original
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_A);
-            batman_parse_voltages(CMD_READ_A);
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_B);
-            batman_parse_voltages(CMD_READ_B);
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_C);
-            batman_parse_voltages(CMD_READ_C);
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_D);
-            batman_parse_voltages(CMD_READ_D);
-            
-            loop_state++;
-            break;
-            
-        case 5:  // Read voltage registers E-F
-            printf("\n=== BATMan State 5: READ VOLTAGES E-F ===\n");
-            batman_idle_wake();
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_STATUS);
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_STATUS);  // Read twice like original
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_E);
-            batman_parse_voltages(CMD_READ_E);
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_F);
-            sleep_us(send_delay_us);
-            
-            batman_get_data(CMD_READ_AUX_A);  // Read Aux like original
-            
-            // Update all cell voltages
-            batman_update_cell_voltages();
-            
-            loop_state++;
-            break;
-            
-        case 6:  // Wakeup and write config
-            printf("\n=== BATMan State 6: WAKEUP & CONFIG ===\n");
-            batman_wakeup();
-            batman_get_data(CMD_READ_CONFIG);
-            batman_send_command(CMD_UNMUTE);
-            loop_state++;
-            break;
-            
-        case 7:  // Update complete
-            printf("\n=== BATMan State 7: UPDATE COMPLETE ===\n");
-            printf("BATMan: Cycle complete - %d cells found\n", cells_present);
-            current_state = BATMAN_STATE_READING;
-            loop_state++;
-            break;
-            
-        case 8:  // Idle/waiting state
+        case 1:  // Wait 5 seconds then repeat
             idle_count++;
-            
-            // Wait configured interval then restart
-            if (idle_count > 80) {  // ~8 seconds at 100ms loop
+            if (idle_count > 50) {  // ~5 seconds at 100ms loop
                 loop_state = 0;
                 idle_count = 0;
-                printf("\n=== BATMan: Starting new measurement cycle ===\n");
+                printf("\n=== Repeating test in 5 seconds... ===\n");
             }
             break;
             
@@ -565,8 +514,9 @@ void batman_loop(void) {
         last_update = now;
         
         if (!initialized) {
-            printf("\n*** BATMan State Machine Started ***\n");
-            printf("*** Will read all cell voltages automatically ***\n\n");
+            printf("\n*** BATMan MINIMAL Test Mode ***\n");
+            printf("*** Original sequence restored ***\n");
+            printf("*** Test repeats every 5 seconds ***\n\n");
             initialized = true;
         }
         

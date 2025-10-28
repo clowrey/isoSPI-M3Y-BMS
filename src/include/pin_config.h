@@ -15,7 +15,7 @@
 #define TESLA_BMS_PIN_MOSI      19       // GP19 - SPI0_MOSI
 #define TESLA_BMS_PIN_SCK       18       // GP18 - SPI0_SCK
 #define TESLA_BMS_PIN_CS        17       // GP17 - Chip Select (GPIO)
-#define TESLA_BMS_PIN_ENABLE    20       // GP20 - BMB Enable (Active HIGH)
+#define TESLA_BMS_PIN_ENABLE    20       // GP20 - BMB Enable (Active LOW per ESP32)
 
 // INA228 Current Sensor I2C Interface (I2C0)
 #define INA228_I2C_INST         i2c0
