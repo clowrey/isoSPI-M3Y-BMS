@@ -418,35 +418,43 @@ static void batman_update_cell_voltages(void) {
  */
 static void batman_simple_test(void) {
     printf("\n=== MINIMAL TEST: Original Sequence (simplified) ===\n");
+    printf("Showing all delays between commands...\n\n");
     
     // Step 1: Wake up the IC
     printf("Step 1: Waking up IC...\n");
     batman_wakeup();
-    sleep_ms(100);  // Wait after wakeup
+    printf("  → Delay: 1 ms\n");
+    sleep_ms(1);  // Wait after wakeup
     
     // Step 2: Send idle wake (makes IC responsive)
-    printf("Step 2: Sending idle wake...\n");
+    printf("\nStep 2: Sending idle wake...\n");
     batman_idle_wake();
-    sleep_ms(100);
+    printf("  → Delay: 1 ms\n");
+    sleep_ms(1);
     
     // Step 3: First snapshot
-    printf("Step 3: Taking snapshot 1...\n");
+    printf("\nStep 3: Taking snapshot 1...\n");
     batman_idle_wake();
-    sleep_us(125);
+    printf("  → Delay: 50 us\n");
+    sleep_us(50);
     batman_send_command(CMD_SNAPSHOT);
-    sleep_us(125);
+    printf("  → Delay: 50 us\n");
+    sleep_us(50);
     
     // Step 4: Second snapshot (no ADC delay)
-    printf("Step 4: Taking snapshot 2...\n");
+    printf("\nStep 4: Taking snapshot 2...\n");
     batman_idle_wake();
-    sleep_us(125);
+    printf("  → Delay: 50 us\n");
+    sleep_us(50);
     batman_send_command(CMD_SNAPSHOT);
-    sleep_us(125);
+    printf("  → Delay: 50 us\n");
+    sleep_us(50);
     
     // Step 5: Read voltage register A (skip STATUS reads)
-    printf("Step 5: Reading cell voltages (Register A)...\n");
+    printf("\nStep 5: Reading cell voltages (Register A)...\n");
     batman_idle_wake();
-    sleep_us(125);
+    printf("  → Delay: 50 us\n");
+    sleep_us(50);
     
     batman_get_data(CMD_READ_A);
     
