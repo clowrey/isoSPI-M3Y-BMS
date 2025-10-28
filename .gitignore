@@ -42,3 +42,5 @@ venv.bak/
 *.swo
 *~ 
 build
+pico-sdk
+picotool
