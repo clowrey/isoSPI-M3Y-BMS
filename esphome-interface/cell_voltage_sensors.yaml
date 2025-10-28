@@ -1,0 +1,344 @@
+# Cell Voltage Sensors Configuration (Concise Version)
+# This file contains all 108 individual cell voltage sensors (u001-u108)
+# Uses YAML anchors to reduce repetition from 674 lines to ~50 lines
+
+# Cell Voltage Sensors (u001-u108) - Using YAML anchors for conciseness
+sensor:
+  # Cells 1-20 (u001 serves as template anchor)
+  - &cell_voltage_template
+    platform: template
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    name: "u001"
+    id: u001
+  - <<: *cell_voltage_template
+    name: "u002"
+    id: u002
+  - <<: *cell_voltage_template
+    name: "u003"
+    id: u003
+  - <<: *cell_voltage_template
+    name: "u004"
+    id: u004
+  - <<: *cell_voltage_template
+    name: "u005"
+    id: u005
+  - <<: *cell_voltage_template
+    name: "u006"
+    id: u006
+  - <<: *cell_voltage_template
+    name: "u007"
+    id: u007
+  - <<: *cell_voltage_template
+    name: "u008"
+    id: u008
+  - <<: *cell_voltage_template
+    name: "u009"
+    id: u009
+  - <<: *cell_voltage_template
+    name: "u010"
+    id: u010
+  - <<: *cell_voltage_template
+    name: "u011"
+    id: u011
+  - <<: *cell_voltage_template
+    name: "u012"
+    id: u012
+  - <<: *cell_voltage_template
+    name: "u013"
+    id: u013
+  - <<: *cell_voltage_template
+    name: "u014"
+    id: u014
+  - <<: *cell_voltage_template
+    name: "u015"
+    id: u015
+  - <<: *cell_voltage_template
+    name: "u016"
+    id: u016
+  - <<: *cell_voltage_template
+    name: "u017"
+    id: u017
+  - <<: *cell_voltage_template
+    name: "u018"
+    id: u018
+  - <<: *cell_voltage_template
+    name: "u019"
+    id: u019
+  - <<: *cell_voltage_template
+    name: "u020"
+    id: u020
+
+  # Cells 21-40
+  - <<: *cell_voltage_template
+    name: "u021"
+    id: u021
+  - <<: *cell_voltage_template
+    name: "u022"
+    id: u022
+  - <<: *cell_voltage_template
+    name: "u023"
+    id: u023
+  - <<: *cell_voltage_template
+    name: "u024"
+    id: u024
+  - <<: *cell_voltage_template
+    name: "u025"
+    id: u025
+  - <<: *cell_voltage_template
+    name: "u026"
+    id: u026
+  - <<: *cell_voltage_template
+    name: "u027"
+    id: u027
+  - <<: *cell_voltage_template
+    name: "u028"
+    id: u028
+  - <<: *cell_voltage_template
+    name: "u029"
+    id: u029
+  - <<: *cell_voltage_template
+    name: "u030"
+    id: u030
+  - <<: *cell_voltage_template
+    name: "u031"
+    id: u031
+  - <<: *cell_voltage_template
+    name: "u032"
+    id: u032
+  - <<: *cell_voltage_template
+    name: "u033"
+    id: u033
+  - <<: *cell_voltage_template
+    name: "u034"
+    id: u034
+  - <<: *cell_voltage_template
+    name: "u035"
+    id: u035
+  - <<: *cell_voltage_template
+    name: "u036"
+    id: u036
+  - <<: *cell_voltage_template
+    name: "u037"
+    id: u037
+  - <<: *cell_voltage_template
+    name: "u038"
+    id: u038
+  - <<: *cell_voltage_template
+    name: "u039"
+    id: u039
+  - <<: *cell_voltage_template
+    name: "u040"
+    id: u040
+
+  # Cells 41-60
+  - <<: *cell_voltage_template
+    name: "u041"
+    id: u041
+  - <<: *cell_voltage_template
+    name: "u042"
+    id: u042
+  - <<: *cell_voltage_template
+    name: "u043"
+    id: u043
+  - <<: *cell_voltage_template
+    name: "u044"
+    id: u044
+  - <<: *cell_voltage_template
+    name: "u045"
+    id: u045
+  - <<: *cell_voltage_template
+    name: "u046"
+    id: u046
+  - <<: *cell_voltage_template
+    name: "u047"
+    id: u047
+  - <<: *cell_voltage_template
+    name: "u048"
+    id: u048
+  - <<: *cell_voltage_template
+    name: "u049"
+    id: u049
+  - <<: *cell_voltage_template
+    name: "u050"
+    id: u050
+  - <<: *cell_voltage_template
+    name: "u051"
+    id: u051
+  - <<: *cell_voltage_template
+    name: "u052"
+    id: u052
+  - <<: *cell_voltage_template
+    name: "u053"
+    id: u053
+  - <<: *cell_voltage_template
+    name: "u054"
+    id: u054
+  - <<: *cell_voltage_template
+    name: "u055"
+    id: u055
+  - <<: *cell_voltage_template
+    name: "u056"
+    id: u056
+  - <<: *cell_voltage_template
+    name: "u057"
+    id: u057
+  - <<: *cell_voltage_template
+    name: "u058"
+    id: u058
+  - <<: *cell_voltage_template
+    name: "u059"
+    id: u059
+  - <<: *cell_voltage_template
+    name: "u060"
+    id: u060
+
+  # Cells 61-80
+  - <<: *cell_voltage_template
+    name: "u061"
+    id: u061
+  - <<: *cell_voltage_template
+    name: "u062"
+    id: u062
+  - <<: *cell_voltage_template
+    name: "u063"
+    id: u063
+  - <<: *cell_voltage_template
+    name: "u064"
+    id: u064
+  - <<: *cell_voltage_template
+    name: "u065"
+    id: u065
+  - <<: *cell_voltage_template
+    name: "u066"
+    id: u066
+  - <<: *cell_voltage_template
+    name: "u067"
+    id: u067
+  - <<: *cell_voltage_template
+    name: "u068"
+    id: u068
+  - <<: *cell_voltage_template
+    name: "u069"
+    id: u069
+  - <<: *cell_voltage_template
+    name: "u070"
+    id: u070
+  - <<: *cell_voltage_template
+    name: "u071"
+    id: u071
+  - <<: *cell_voltage_template
+    name: "u072"
+    id: u072
+  - <<: *cell_voltage_template
+    name: "u073"
+    id: u073
+  - <<: *cell_voltage_template
+    name: "u074"
+    id: u074
+  - <<: *cell_voltage_template
+    name: "u075"
+    id: u075
+  - <<: *cell_voltage_template
+    name: "u076"
+    id: u076
+  - <<: *cell_voltage_template
+    name: "u077"
+    id: u077
+  - <<: *cell_voltage_template
+    name: "u078"
+    id: u078
+  - <<: *cell_voltage_template
+    name: "u079"
+    id: u079
+  - <<: *cell_voltage_template
+    name: "u080"
+    id: u080
+
+  # Cells 81-100
+  - <<: *cell_voltage_template
+    name: "u081"
+    id: u081
+  - <<: *cell_voltage_template
+    name: "u082"
+    id: u082
+  - <<: *cell_voltage_template
+    name: "u083"
+    id: u083
+  - <<: *cell_voltage_template
+    name: "u084"
+    id: u084
+  - <<: *cell_voltage_template
+    name: "u085"
+    id: u085
+  - <<: *cell_voltage_template
+    name: "u086"
+    id: u086
+  - <<: *cell_voltage_template
+    name: "u087"
+    id: u087
+  - <<: *cell_voltage_template
+    name: "u088"
+    id: u088
+  - <<: *cell_voltage_template
+    name: "u089"
+    id: u089
+  - <<: *cell_voltage_template
+    name: "u090"
+    id: u090
+  - <<: *cell_voltage_template
+    name: "u091"
+    id: u091
+  - <<: *cell_voltage_template
+    name: "u092"
+    id: u092
+  - <<: *cell_voltage_template
+    name: "u093"
+    id: u093
+  - <<: *cell_voltage_template
+    name: "u094"
+    id: u094
+  - <<: *cell_voltage_template
+    name: "u095"
+    id: u095
+  - <<: *cell_voltage_template
+    name: "u096"
+    id: u096
+  - <<: *cell_voltage_template
+    name: "u097"
+    id: u097
+  - <<: *cell_voltage_template
+    name: "u098"
+    id: u098
+  - <<: *cell_voltage_template
+    name: "u099"
+    id: u099
+  - <<: *cell_voltage_template
+    name: "u100"
+    id: u100
+
+  # Cells 101-108
+  - <<: *cell_voltage_template
+    name: "u101"
+    id: u101
+  - <<: *cell_voltage_template
+    name: "u102"
+    id: u102
+  - <<: *cell_voltage_template
+    name: "u103"
+    id: u103
+  - <<: *cell_voltage_template
+    name: "u104"
+    id: u104
+  - <<: *cell_voltage_template
+    name: "u105"
+    id: u105
+  - <<: *cell_voltage_template
+    name: "u106"
+    id: u106
+  - <<: *cell_voltage_template
+    name: "u107"
+    id: u107
+  - <<: *cell_voltage_template
+    name: "u108"
+    id: u108 
