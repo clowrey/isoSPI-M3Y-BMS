@@ -7,7 +7,6 @@
 *.o
 *.a
 *.hex
-*.bin
 *.elf
 *.map
 *.lst
