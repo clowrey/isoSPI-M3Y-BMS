@@ -167,7 +167,7 @@ static void batman_send_command(uint16_t cmd_word) {
     // NO PRINTF for precise timing
     
     gpio_put(TESLA_BMS_PIN_CS, 0);
-    sleep_us(10);
+    //sleep_us(10);
     
     uint8_t tx_buf[2];
     uint8_t rx_buf[2];
@@ -178,7 +178,7 @@ static void batman_send_command(uint16_t cmd_word) {
     // Send command and read response
     spi_write_read_blocking(TESLA_BMS_SPI_INST, tx_buf, rx_buf, 2);
     
-    sleep_us(10);
+   // sleep_us(10);
     gpio_put(TESLA_BMS_PIN_CS, 1);
 }
 
@@ -211,7 +211,7 @@ static void batman_get_data(uint8_t reg_cmd) {
     
     // CS low
     gpio_put(TESLA_BMS_PIN_CS, 0);
-    sleep_us(10);  // Small delay after CS
+    //sleep_us(10);  // Small delay after CS
     
     // Send first 16-bit word (command)
     uint8_t tx_buf[2];
@@ -242,7 +242,7 @@ static void batman_get_data(uint8_t reg_cmd) {
     }
     
     // CS high
-    sleep_us(10);  // Small delay before CS
+    //sleep_us(10);  // Small delay before CS
     gpio_put(TESLA_BMS_PIN_CS, 1);
 }
 
@@ -376,13 +376,12 @@ static void batman_simple_test(void) {
     // ============================================================
     
     // Step 1: Wake up the IC
-    //batman_wakeup();
     batman_send_command(CMD_WAKEUP);
-    sleep_us(100); // CL - 80us too short
+    sleep_us(120); // CL - 80us too short when 10us delay in send command for CS, added 20us once removing delays in send command
 
     // Step 2: Send idle wake (makes IC responsive)
     batman_send_command(CMD_IDLE_WAKE);
-    sleep_us(50); // CL - 40us too short - snapshot will not update data
+    sleep_us(70); // CL - 40us too short when 10us delay in send command for CS - snapshot will not update data, added 20us once removing delays in send command
 
     // Step 3: Snapshot
     batman_send_command(CMD_SNAPSHOT); // CL - Sample new data from the ADC
@@ -395,6 +394,38 @@ static void batman_simple_test(void) {
     // ============================================================
     
     printf("\n=== BMS READ COMPLETE ===\n");
+    
+    // Print command sequence that was sent
+    printf("\n=== COMMAND SEQUENCE SENT ===\n");
+    printf("Commands sent in order (MSB first, high byte first):\n\n");
+    
+    // Command 1: WAKEUP
+    printf("1. WAKEUP command:     0x%04X (CMD_WAKEUP)\n", CMD_WAKEUP);
+    printf("   Byte 1: 0x%02X = 0b%08b\n", (CMD_WAKEUP >> 8) & 0xFF, (CMD_WAKEUP >> 8) & 0xFF);
+    printf("   Byte 2: 0x%02X = 0b%08b\n", CMD_WAKEUP & 0xFF, CMD_WAKEUP & 0xFF);
+    printf("   → Delay: 120 μs\n\n");
+    
+    // Command 2: IDLE_WAKE
+    printf("2. IDLE_WAKE command:  0x%04X (CMD_IDLE_WAKE)\n", CMD_IDLE_WAKE);
+    printf("   Byte 1: 0x%02X = 0b%08b\n", (CMD_IDLE_WAKE >> 8) & 0xFF, (CMD_IDLE_WAKE >> 8) & 0xFF);
+    printf("   Byte 2: 0x%02X = 0b%08b\n", CMD_IDLE_WAKE & 0xFF, CMD_IDLE_WAKE & 0xFF);
+    printf("   → Delay: 70 μs\n\n");
+    
+    // Command 3: SNAPSHOT
+    printf("3. SNAPSHOT command:   0x%04X (CMD_SNAPSHOT)\n", CMD_SNAPSHOT);
+    printf("   Byte 1: 0x%02X = 0b%08b\n", (CMD_SNAPSHOT >> 8) & 0xFF, (CMD_SNAPSHOT >> 8) & 0xFF);
+    printf("   Byte 2: 0x%02X = 0b%08b\n", CMD_SNAPSHOT & 0xFF, CMD_SNAPSHOT & 0xFF);
+    printf("   → No delay\n\n");
+    
+    // Command 4: READ_A
+    uint8_t crc = batman_calc_crc((uint8_t[]){CMD_READ_A, 0x00}, 2);
+    printf("4. READ_A command:     0x%02X00 (CMD_READ_A)\n", CMD_READ_A);
+    printf("   Byte 1: 0x%02X = 0b%08b (command)\n", CMD_READ_A, CMD_READ_A);
+    printf("   Byte 2: 0x00 = 0b00000000\n");
+    printf("   Byte 3: 0x%02X = 0b%08b (CRC)\n", crc, crc);
+    printf("   Byte 4: 0x00 = 0b00000000\n");
+    printf("   → Then 72 bytes read from response\n");
+    printf("==============================\n");
     
     printf("\n=== RAW RESPONSE (first BMB only) ===\n");
     printf("Register A (0x47) format per BMB: [Cell0_L Cell0_H] [Cell1_L Cell1_H] [Cell2_L Cell2_H] [Extra 3 bytes]\n");

@@ -1,0 +1,48 @@
+=== Repeating test in 2 seconds... ===
+
+=== BMS READ COMPLETE ===
+
+=== COMMAND SEQUENCE SENT ===
+Commands sent in order (MSB first, high byte first):
+
+1. WAKEUP command:     0x2AD4 (CMD_WAKEUP)
+   Byte 1: 0x2A = 0b00101010
+   Byte 2: 0xD4 = 0b11010100
+   → Delay: 120 μs
+
+2. IDLE_WAKE command:  0x21F2 (CMD_IDLE_WAKE)
+   Byte 1: 0x21 = 0b00100001
+   Byte 2: 0xF2 = 0b11110010
+   → Delay: 70 μs
+
+3. SNAPSHOT command:   0x2BFB (CMD_SNAPSHOT)
+   Byte 1: 0x2B = 0b00101011
+   Byte 2: 0xFB = 0b11111011
+   → No delay
+
+4. READ_A command:     0x4700 (CMD_READ_A)
+   Byte 1: 0x47 = 0b01000111 (command)
+   Byte 2: 0x00 = 0b00000000
+   Byte 3: 0x70 = 0b01110000 (CRC)
+   Byte 4: 0x00 = 0b00000000
+   → Then 72 bytes read from response
+==============================
+
+=== RAW RESPONSE (first BMB only) ===
+Register A (0x47) format per BMB: [Cell0_L Cell0_H] [Cell1_L Cell1_H] [Cell2_L Cell2_H] [Extra 3 bytes]
+Each cell = 2 bytes (little endian), Extra bytes may be padding/CRC/status
+
+BMB0: [EC B7] [3F B8] [04 B8] Extra:[17 BF FF]
+
+=== DECODED VOLTAGES ===
+Register A contains cells 0-2 (showing BMB 0 only):
+
+BMB 0:
+  Cell 0: [EC B7] = 0xB7EC → 3766 mV (3.766 V) ✓
+  Cell 1: [3F B8] = 0xB83F → 3773 mV (3.773 V) ✓
+  Cell 2: [04 B8] = 0xB804 → 3768 mV (3.768 V) ✓
+
+=== SUMMARY ===
+Valid cells found: 3
+✓ SUCCESS - Data decoded!
+===============================================
