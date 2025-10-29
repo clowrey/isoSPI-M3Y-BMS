@@ -147,20 +147,16 @@ static uint8_t batman_calc_crc(uint8_t *data, uint8_t length) {
 static void batman_wakeup(void) {
     uint16_t wakeup_cmd = CMD_WAKEUP;
     
-    printf("BATMan: Sending WAKEUP...\n");
+    // Send wakeup once (testing single wakeup) - NO PRINTF for precise timing
+    gpio_put(TESLA_BMS_PIN_CS, 0);
     
-    // Send wakeup 4 times
-    for (int i = 0; i < 4; i++) {
-        gpio_put(TESLA_BMS_PIN_CS, 0);
-        
-        uint8_t cmd_bytes[2];
-        cmd_bytes[0] = (wakeup_cmd >> 8) & 0xFF;
-        cmd_bytes[1] = wakeup_cmd & 0xFF;
-        spi_write_blocking(TESLA_BMS_SPI_INST, cmd_bytes, 2);
-        
-        gpio_put(TESLA_BMS_PIN_CS, 1);
-        sleep_us(100);
-    }
+    uint8_t cmd_bytes[2];
+    cmd_bytes[0] = (wakeup_cmd >> 8) & 0xFF;
+    cmd_bytes[1] = wakeup_cmd & 0xFF;
+    spi_write_blocking(TESLA_BMS_SPI_INST, cmd_bytes, 2);
+    
+    gpio_put(TESLA_BMS_PIN_CS, 1);
+    sleep_us(10);
 }
 
 /**
@@ -168,7 +164,7 @@ static void batman_wakeup(void) {
  * Commands like SNAPSHOT (0x2BFB) and UNMUTE (0x21F2) are 16-bit
  */
 static void batman_send_command(uint16_t cmd_word) {
-    printf("BATMan: Sending command 0x%04X\n", cmd_word);
+    // NO PRINTF for precise timing
     
     gpio_put(TESLA_BMS_PIN_CS, 0);
     sleep_us(10);
@@ -181,7 +177,6 @@ static void batman_send_command(uint16_t cmd_word) {
     
     // Send command and read response
     spi_write_read_blocking(TESLA_BMS_SPI_INST, tx_buf, rx_buf, 2);
-    printf("  TX: %02X %02X -> RX: %02X %02X\n", tx_buf[0], tx_buf[1], rx_buf[0], rx_buf[1]);
     
     sleep_us(10);
     gpio_put(TESLA_BMS_PIN_CS, 1);
@@ -209,7 +204,7 @@ static void batman_get_data(uint8_t reg_cmd) {
     uint16_t cmd_word = (reg_cmd << 8);  // 0x4700 for Read A
     uint16_t crc_word = (crc << 8);      // 0x7000 for Read A CRC
     
-    printf("BATMan: Reading register 0x%02X (cmd=0x%04X, crc=0x%04X)\n", reg_cmd, cmd_word, crc_word);
+    // NO PRINTF for precise timing
     
     // Initialize buffer to 0x00 (not 0xFF) to see if data comes in
     memset(response_buffer, 0x00, 72);
@@ -224,30 +219,20 @@ static void batman_get_data(uint8_t reg_cmd) {
     
     tx_buf[0] = (cmd_word >> 8) & 0xFF;  // High byte first
     tx_buf[1] = cmd_word & 0xFF;          // Low byte
-    printf("  TX cmd: %02X %02X", tx_buf[0], tx_buf[1]);
     spi_write_read_blocking(TESLA_BMS_SPI_INST, tx_buf, rx_buf, 2);
-    printf(" -> RX: %02X %02X\n", rx_buf[0], rx_buf[1]);
     
     // Send second 16-bit word (CRC)
     tx_buf[0] = (crc_word >> 8) & 0xFF;
     tx_buf[1] = crc_word & 0xFF;
-    printf("  TX crc: %02X %02X", tx_buf[0], tx_buf[1]);
     spi_write_read_blocking(TESLA_BMS_SPI_INST, tx_buf, rx_buf, 2);
-    printf(" -> RX: %02X %02X\n", rx_buf[0], rx_buf[1]);
     
     // Read 72 bytes of response (37 x 16-bit transfers with padding)
     // Original: for (count2 = 0; count2 <= 72; count2 = count2 + 2)
-    printf("  Reading response data...\n");
     for (int count = 0; count <= 72; count += 2) {
         // Send 16-bit padding (0x0000)
         tx_buf[0] = 0x00;
         tx_buf[1] = 0x00;
         spi_write_read_blocking(TESLA_BMS_SPI_INST, tx_buf, rx_buf, 2);
-        
-        // Debug first few transfers
-        if (count < 10) {
-            printf("  [%d]: TX %02X %02X -> RX %02X %02X\n", count, tx_buf[0], tx_buf[1], rx_buf[0], rx_buf[1]);
-        }
         
         // Store response
         if (count < 72) {  // Don't overflow buffer
@@ -259,13 +244,6 @@ static void batman_get_data(uint8_t reg_cmd) {
     // CS high
     sleep_us(10);  // Small delay before CS
     gpio_put(TESLA_BMS_PIN_CS, 1);
-    
-    // Debug: Show what ended up in buffer
-    printf("  First 8 buffer bytes: ");
-    for (int i = 0; i < 8; i++) {
-        printf("%02X ", response_buffer[i]);
-    }
-    printf("\n");
 }
 
 /**
@@ -277,43 +255,19 @@ static void batman_parse_voltages(uint8_t reg_cmd) {
     // Parse based on register command (from original GetData switch statement)
     switch (reg_cmd) {
         case CMD_READ_A:  // 0x47 - Cells 0-2
-            printf("BATMan: Parsing Read A (cells 0-2)\n");
-            
-            // Debug: Print first 27 bytes of response buffer
-            printf("BATMan: Response buffer (first 27 bytes):\n");
-            for (int i = 0; i < 27; i++) {
-                printf("%02X ", response_buffer[i]);
-                if ((i + 1) % 9 == 0) printf("\n");
-            }
-            printf("\n");
-            
             for (int h = 0; h < 8; h++) {  // 8 BMBs
                 for (int g = 0; g <= 2; g++) {  // 3 cells
                     int idx = (h * 9) + (g * 2);
                     tempvol = response_buffer[idx + 1] * 256 + response_buffer[idx];
                     
-                    // Debug first BMB only
-                    if (h == 0) {
-                        printf("  BMB%d Cell%d: idx=%d bytes=[%02X %02X] raw=0x%04X", 
-                               h, g, idx, response_buffer[idx], response_buffer[idx+1], tempvol);
-                    }
-                    
                     if (tempvol != 0xFFFF && tempvol != 0x0000) {
                         voltage_array[h][g] = tempvol / 12.5;
-                        if (h == 0) {
-                            printf(" -> %d mV\n", voltage_array[h][g]);
-                        }
-                    } else {
-                        if (h == 0) {
-                            printf(" -> INVALID\n");
-                        }
                     }
                 }
             }
             break;
             
         case CMD_READ_B:  // 0x48 - Cells 3-5
-            printf("BATMan: Parsing Read B (cells 3-5)\n");
             for (int h = 0; h < 8; h++) {
                 for (int g = 3; g <= 5; g++) {
                     tempvol = response_buffer[1 + (h * 9) + ((g - 3) * 2)] * 256 + response_buffer[0 + (h * 9) + ((g - 3) * 2)];
@@ -414,71 +368,90 @@ static void batman_update_cell_voltages(void) {
 }
 
 /**
- * @brief Minimal test - restore original working sequence
+ * @brief Minimal test - with precise timing (no printf between commands)
  */
 static void batman_simple_test(void) {
-    printf("\n=== MINIMAL TEST: Original Sequence (simplified) ===\n");
-    printf("Showing all delays between commands...\n\n");
+    // ============================================================
+    // PHASE 1: Send all commands with precise timing (no printing)
+    // ============================================================
     
     // Step 1: Wake up the IC
-    printf("Step 1: Waking up IC...\n");
-    batman_wakeup();
-    printf("  → Delay: 1 ms\n");
-    sleep_ms(1);  // Wait after wakeup
-    
+    //batman_wakeup();
+    batman_send_command(CMD_WAKEUP);
+    sleep_us(100); // CL - 80us too short
+
     // Step 2: Send idle wake (makes IC responsive)
-    printf("\nStep 2: Sending idle wake...\n");
-    batman_idle_wake();
-    printf("  → Delay: 1 ms\n");
-    sleep_ms(1);
-    
-    // Step 3: First snapshot
-    printf("\nStep 3: Taking snapshot 1...\n");
-    batman_idle_wake();
-    printf("  → Delay: 50 us\n");
-    sleep_us(50);
-    batman_send_command(CMD_SNAPSHOT);
-    printf("  → Delay: 50 us\n");
-    sleep_us(50);
-    
-    // Step 4: Second snapshot (no ADC delay)
-    printf("\nStep 4: Taking snapshot 2...\n");
-    batman_idle_wake();
-    printf("  → Delay: 50 us\n");
-    sleep_us(50);
-    batman_send_command(CMD_SNAPSHOT);
-    printf("  → Delay: 50 us\n");
-    sleep_us(50);
-    
-    // Step 5: Read voltage register A (skip STATUS reads)
-    printf("\nStep 5: Reading cell voltages (Register A)...\n");
-    batman_idle_wake();
-    printf("  → Delay: 50 us\n");
-    sleep_us(50);
-    
+    batman_send_command(CMD_IDLE_WAKE);
+    sleep_us(50); // CL - 40us too short - snapshot will not update data
+
+    // Step 3: Snapshot
+    batman_send_command(CMD_SNAPSHOT); // CL - Sample new data from the ADC
+
+    // Step 4: Read voltage register A
     batman_get_data(CMD_READ_A);
     
-    // Step 6: Parse and display first cell
-    printf("Step 6: Parsing first cell voltage...\n");
-    uint16_t tempvol = response_buffer[1] * 256 + response_buffer[0];
+    // ============================================================
+    // PHASE 2: Parse and display results (after all commands sent)
+    // ============================================================
     
-    printf("\n=== RESULTS ===\n");
-    printf("Raw bytes: [%02X %02X]\n", response_buffer[0], response_buffer[1]);
-    printf("Raw value: 0x%04X (%d decimal)\n", tempvol, tempvol);
+    printf("\n=== BMS READ COMPLETE ===\n");
     
-    if (tempvol != 0xFFFF && tempvol != 0x0000) {
-        uint16_t voltage_mv = tempvol / 12.5;
-        printf("Cell 0 voltage: %d mV (%.3f V)\n", voltage_mv, voltage_mv / 1000.0f);
-        
-        // Store in voltage array
-        voltage_array[0][0] = voltage_mv;
-        
-        // Update parameter
-        param_set_float(PARAM_U1, (float)voltage_mv);
-        
-        printf("✓ SUCCESS - Cell 0 read complete!\n");
+    printf("\n=== RAW RESPONSE (first BMB only) ===\n");
+    printf("Register A (0x47) format per BMB: [Cell0_L Cell0_H] [Cell1_L Cell1_H] [Cell2_L Cell2_H] [Extra 3 bytes]\n");
+    printf("Each cell = 2 bytes (little endian), Extra bytes may be padding/CRC/status\n\n");
+    
+    // Only print BMB 0
+    int i = 0;
+    printf("BMB%d: ", i/9);
+    // Cell 0 (bytes 0-1)
+    printf("[%02X %02X]", response_buffer[i], response_buffer[i+1]);
+    // Cell 1 (bytes 2-3)
+    printf(" [%02X %02X]", response_buffer[i+2], response_buffer[i+3]);
+    // Cell 2 (bytes 4-5)
+    printf(" [%02X %02X]", response_buffer[i+4], response_buffer[i+5]);
+    // Extra bytes (6-8)
+    printf(" Extra:[%02X %02X %02X]\n", response_buffer[i+6], response_buffer[i+7], response_buffer[i+8]);
+    
+    printf("\n=== DECODED VOLTAGES ===\n");
+    printf("Register A contains cells 0-2 (showing BMB 0 only):\n\n");
+    
+    int valid_cells = 0;
+    // Only decode and print BMB 0
+    int bmb = 0;
+    printf("BMB %d:\n", bmb);
+    for (int cell = 0; cell <= 2; cell++) {  // Cells 0-2
+        int idx = (bmb * 9) + (cell * 2);
+        if (idx + 1 < 72) {
+            uint16_t tempvol = response_buffer[idx + 1] * 256 + response_buffer[idx];
+            
+            printf("  Cell %d: [%02X %02X] = 0x%04X", 
+                   cell, response_buffer[idx], response_buffer[idx+1], tempvol);
+            
+            if (tempvol != 0xFFFF && tempvol != 0x0000) {
+                uint16_t voltage_mv = tempvol / 12.5;
+                printf(" → %d mV (%.3f V) ✓\n", voltage_mv, voltage_mv / 1000.0f);
+                
+                // Store in voltage array
+                voltage_array[bmb][cell] = voltage_mv;
+                valid_cells++;
+                
+                // Update parameter for first cell
+                if (cell == 0) {
+                    param_set_float(PARAM_U1, (float)voltage_mv);
+                }
+            } else {
+                printf(" → INVALID\n");
+            }
+        }
+    }
+    printf("\n");
+    
+    printf("=== SUMMARY ===\n");
+    printf("Valid cells found: %d\n", valid_cells);
+    if (valid_cells > 0) {
+        printf("✓ SUCCESS - Data decoded!\n");
     } else {
-        printf("✗ FAILED - Invalid voltage reading (0xFFFF or 0x0000)\n");
+        printf("✗ FAILED - No valid cell data\n");
     }
     
     printf("===============================================\n\n");
@@ -494,12 +467,12 @@ static void batman_state_machine(void) {
             loop_state++;
             break;
             
-        case 1:  // Wait 5 seconds then repeat
+        case 1:  // Wait 2 seconds then repeat
             idle_count++;
-            if (idle_count > 50) {  // ~5 seconds at 100ms loop
+            if (idle_count > 20) {  // ~2 seconds at 100ms loop
                 loop_state = 0;
                 idle_count = 0;
-                printf("\n=== Repeating test in 5 seconds... ===\n");
+                printf("\n=== Repeating test in 2 seconds... ===\n");
             }
             break;
             
@@ -524,7 +497,7 @@ void batman_loop(void) {
         if (!initialized) {
             printf("\n*** BATMan MINIMAL Test Mode ***\n");
             printf("*** Original sequence restored ***\n");
-            printf("*** Test repeats every 5 seconds ***\n\n");
+            printf("*** Test repeats every 2 seconds ***\n\n");
             initialized = true;
         }
         

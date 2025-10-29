@@ -52,9 +52,38 @@ echo ""
 echo "Output files:"
 ls -lh tesla_bms_rp2350.uf2 tesla_bms_rp2350.elf 2>/dev/null || true
 echo ""
-echo "To flash:"
-echo "  1. Hold BOOTSEL button while connecting USB"
-echo "  2. Copy build/tesla_bms_rp2350.uf2 to the mounted drive"
-echo "  3. Device will reboot automatically"
+
+# Attempt automatic flash with picotool (using same method as VS Code Pico extension)
+echo "Attempting automatic flash..."
+if command -v picotool &> /dev/null; then
+    if [ -f "tesla_bms_rp2350.elf" ]; then
+        echo "Flashing with picotool..."
+        # The -x flag automatically:
+        #   1. Tracks device and reboots to BOOTSEL mode if needed
+        #   2. Loads the firmware into flash
+        #   3. Reboots device to start application
+        if picotool load -x tesla_bms_rp2350.elf 2>&1; then
+            echo ""
+            echo "✓ Flash successful! Device rebooted and running."
+        else
+            echo ""
+            echo "✗ Flash failed or no device detected"
+            echo ""
+            echo "Manual flash instructions:"
+            echo "  1. Hold BOOTSEL button while connecting USB"
+            echo "  2. Copy build/tesla_bms_rp2350.uf2 to the mounted drive"
+            echo "  3. Device will reboot automatically"
+        fi
+    else
+        echo "✗ tesla_bms_rp2350.elf not found!"
+    fi
+else
+    echo "picotool not found - skipping automatic flash"
+    echo ""
+    echo "Manual flash instructions:"
+    echo "  1. Hold BOOTSEL button while connecting USB"
+    echo "  2. Copy build/tesla_bms_rp2350.uf2 to the mounted drive"
+    echo "  3. Device will reboot automatically"
+fi
 echo ""
 
