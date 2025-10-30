@@ -167,7 +167,9 @@ static void batman_send_command(uint16_t cmd_word) {
     // NO PRINTF for precise timing
     
     gpio_put(TESLA_BMS_PIN_CS, 0);
-    //sleep_us(10);
+    sleep_us(5); //CL - 5us needed to wakeup the master - or it will miss the first clock cycles
+    // CL - first SCK to CS timing will sync with the clock - so jitter of 1 SCK cycle is expected
+    //for(int i=0;i<100;i++) asm("");
     
     uint8_t tx_buf[2];
     uint8_t rx_buf[2];
@@ -377,11 +379,11 @@ static void batman_simple_test(void) {
     
     // Step 1: Wake up the IC
     batman_send_command(CMD_WAKEUP);
-    sleep_us(120); // CL - 80us too short when 10us delay in send command for CS, added 20us once removing delays in send command
+    sleep_us(120); // CL - 100us too short - 120us works
 
     // Step 2: Send idle wake (makes IC responsive)
     batman_send_command(CMD_IDLE_WAKE);
-    sleep_us(70); // CL - 40us too short when 10us delay in send command for CS - snapshot will not update data, added 20us once removing delays in send command
+    sleep_us(70); // CL - 60us too short - 70us works, snapshot will not update data if too short
 
     // Step 3: Snapshot
     batman_send_command(CMD_SNAPSHOT); // CL - Sample new data from the ADC
@@ -428,20 +430,34 @@ static void batman_simple_test(void) {
     printf("==============================\n");
     
     printf("\n=== RAW RESPONSE (first BMB only) ===\n");
-    printf("Register A (0x47) format per BMB: [Cell0_L Cell0_H] [Cell1_L Cell1_H] [Cell2_L Cell2_H] [Extra 3 bytes]\n");
-    printf("Each cell = 2 bytes (little endian), Extra bytes may be padding/CRC/status\n\n");
+    printf("Register A (0x47) format per BMB: 9 bytes per BMB\n");
+    printf("Format: [Cell0_L Cell0_H] [Cell1_L Cell1_H] [Cell2_L Cell2_H] [Extra 3 bytes]\n");
+    printf("Each cell = 2 bytes (little endian)\n\n");
     
-    // Only print BMB 0
+    // Only print BMB 0 with binary format
     int i = 0;
-    printf("BMB%d: ", i/9);
+    printf("BMB %d raw bytes (hex and binary):\n", i/9);
+    
     // Cell 0 (bytes 0-1)
-    printf("[%02X %02X]", response_buffer[i], response_buffer[i+1]);
+    printf("  Cell 0: [Low  0x%02X = 0b%08b] [High 0x%02X = 0b%08b]\n", 
+           response_buffer[i], response_buffer[i], 
+           response_buffer[i+1], response_buffer[i+1]);
+    
     // Cell 1 (bytes 2-3)
-    printf(" [%02X %02X]", response_buffer[i+2], response_buffer[i+3]);
+    printf("  Cell 1: [Low  0x%02X = 0b%08b] [High 0x%02X = 0b%08b]\n", 
+           response_buffer[i+2], response_buffer[i+2], 
+           response_buffer[i+3], response_buffer[i+3]);
+    
     // Cell 2 (bytes 4-5)
-    printf(" [%02X %02X]", response_buffer[i+4], response_buffer[i+5]);
+    printf("  Cell 2: [Low  0x%02X = 0b%08b] [High 0x%02X = 0b%08b]\n", 
+           response_buffer[i+4], response_buffer[i+4], 
+           response_buffer[i+5], response_buffer[i+5]);
+    
     // Extra bytes (6-8)
-    printf(" Extra:[%02X %02X %02X]\n", response_buffer[i+6], response_buffer[i+7], response_buffer[i+8]);
+    printf("  Extra:  [0x%02X = 0b%08b] [0x%02X = 0b%08b] [0x%02X = 0b%08b]\n", 
+           response_buffer[i+6], response_buffer[i+6],
+           response_buffer[i+7], response_buffer[i+7],
+           response_buffer[i+8], response_buffer[i+8]);
     
     printf("\n=== DECODED VOLTAGES ===\n");
     printf("Register A contains cells 0-2 (showing BMB 0 only):\n\n");

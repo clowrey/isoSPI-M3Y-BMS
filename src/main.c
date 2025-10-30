@@ -21,6 +21,7 @@
 #include "ina228.h"
 #include "adc_monitor.h"
 #include "coulomb_counter.h"
+#include "can_interface.h"
 
 // Blinking LED configuration
 #define BLINK_LED_PIN 39  // GP39 for RP2350
@@ -78,10 +79,12 @@ int main() {
     uint32_t last_esphome_update = 0;
     uint32_t last_display_update = 0;
     uint32_t last_blink = 0;
+    uint32_t last_can_broadcast = 0;
     bool blink_led_state = false;
     const uint32_t MAIN_LOOP_INTERVAL = 50;      // 50ms
     const uint32_t ESPHOME_UPDATE_INTERVAL = 1000;  // 1 second
     const uint32_t DISPLAY_UPDATE_INTERVAL = 5000;  // 5 seconds
+    const uint32_t CAN_BROADCAST_INTERVAL = 100;  // 100ms (10Hz)
     
     printf("System ready - entering main loop\n");
     printf("Type 'help' for available commands\n\n");
@@ -121,6 +124,19 @@ int main() {
         if (now - last_esphome_update >= ESPHOME_UPDATE_INTERVAL) {
             last_esphome_update = now;
             param_send_to_esphome();
+        }
+        
+        // Broadcast pack status on CAN bus
+        if (now - last_can_broadcast >= CAN_BROADCAST_INTERVAL) {
+            last_can_broadcast = now;
+            can_interface_broadcast_pack_status();
+            
+            // Process any received CAN messages
+            can_message_t rx_msg;
+            while (can_interface_receive(&rx_msg)) {
+                // Log received CAN messages
+                // (Could be used for remote control in future)
+            }
         }
         
         // Display status on USB serial
@@ -200,6 +216,14 @@ void system_init(void) {
     // Initialize coulomb counter
     printf("Initializing coulomb counter...\n");
     coulomb_counter_init(&coulomb_counter, &ina228_dev);
+    
+    // Initialize CAN interface
+    printf("Initializing CAN interface...\n");
+    if (can_interface_init()) {
+        printf("CAN interface initialized successfully\n");
+    } else {
+        printf("WARNING: CAN interface initialization failed\n");
+    }
     
     printf("System initialization complete!\n");
 }
@@ -377,7 +401,8 @@ void process_command(const char* cmd) {
         printf("  ina228              - Show INA228 status\n");
         printf("  adc                 - Show ADC voltages\n");
         printf("  coulomb             - Show coulomb counter status\n");
-        printf("  batman              - Show BATMan status\n\n");
+        printf("  batman              - Show BATMan status\n");
+        printf("  can                 - Show CAN bus statistics\n\n");
     }
     else if (strcmp(lower_cmd, "status") == 0) {
         printf("\n=== System Status ===\n");
@@ -449,6 +474,15 @@ void process_command(const char* cmd) {
     }
     else if (strcmp(lower_cmd, "batman") == 0) {
         batman_print_hardware_mapping();
+    }
+    else if (strcmp(lower_cmd, "can") == 0) {
+        uint32_t rx_count, tx_count, error_count;
+        can_interface_get_stats(&rx_count, &tx_count, &error_count);
+        printf("\n=== CAN Bus Statistics ===\n");
+        printf("RX Messages: %lu\n", rx_count);
+        printf("TX Messages: %lu\n", tx_count);
+        printf("Errors: %lu\n", error_count);
+        printf("========================\n\n");
     }
     else {
         printf("Unknown command: '%s'\n", cmd);

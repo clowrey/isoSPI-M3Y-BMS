@@ -39,6 +39,7 @@ pico_sdk_init()
 # Add include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}/src/include
+    ${CMAKE_SOURCE_DIR}/can2040/src
 )
 
 # Create the main executable
@@ -49,6 +50,8 @@ add_executable(tesla_bms_rp2350
     src/ina228.c
     src/adc_monitor.c
     src/coulomb_counter.c
+    src/can_interface.c
+    can2040/src/can2040.c
 )
 
 # Link libraries
@@ -61,6 +64,8 @@ target_link_libraries(tesla_bms_rp2350
     hardware_pwm
     hardware_dma
     hardware_gpio
+    hardware_pio
+    hardware_irq
 )
 
 # Enable USB serial output

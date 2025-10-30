@@ -50,6 +50,12 @@
 #define PWM_DUTY_INITIAL        100      // 100% initial pulse
 #define PWM_INITIAL_PULSE_MS    200      // 200ms initial pulse duration
 
+// CAN Bus Interface (PIO0)
+#define CAN_PIN_RX              2        // GP2 - CAN RX
+#define CAN_PIN_TX              3        // GP3 - CAN TX
+#define CAN_PIO_NUM             0        // Use PIO0
+#define CAN_BITRATE             500000   // 500 kbps
+
 // Status LED (built-in)
 #define LED_PIN                 25       // GP25 - Built-in LED
 
