@@ -229,9 +229,9 @@ static void batman_get_data(uint8_t reg_cmd) {
     tx_buf[1] = crc_word & 0xFF;
     spi_write_read_blocking(TESLA_BMS_SPI_INST, tx_buf, rx_buf, 2);
     
-    // Read 72 bytes of response (37 x 16-bit transfers with padding)
-    // Original: for (count2 = 0; count2 <= 72; count2 = count2 + 2)
-    for (int count = 0; count <= 72; count += 2) {
+    // Read only 10 bytes (for 1 BMB + margin) instead of 72 bytes (for 8 BMBs)
+    // This makes the transaction shorter and easier to capture with the snooper
+    for (int count = 0; count <= 10; count += 2) {
         // Send 16-bit padding (0x0000)
         tx_buf[0] = 0x00;
         tx_buf[1] = 0x00;

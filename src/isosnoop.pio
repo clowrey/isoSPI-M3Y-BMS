@@ -4,32 +4,12 @@
 .side_set 1
 .wrap_target
 
-    ; Wait for idle state (both pins HIGH = 0b11)
-    set y, 3 side 0            ; y = 0b11 (both pins HIGH)
-wait_idle:
-    mov x, pins side 0
-    jmp x!=y wait_idle side 0  ; Wait until pins = 0b11
-    
-    ; Now in idle state, wait for a pulse (transition to 0b10, 0b01, or 0b00)
-wait_pulse:
-    mov x, pins side 0
-    jmp x!=y capture_loop side 0  ; Start capturing when activity detected
-    jmp wait_pulse side 0
-    
-capture_loop:
-    ; Keep capturing while there's activity (not idle)
-    ; Sample continuously to catch all data
-    in pins, 2 side 1          ; Sample 1
-    in pins, 2 side 0          ; Sample 2  
-    in pins, 2 side 1          ; Sample 3
-    in pins, 2 side 0          ; Sample 4 (autopush at 4 samples = 8 bits = 1 byte)
-    
-    ; Check if we're back to idle
-    mov x, pins side 0
-    jmp x!=y capture_loop side 0  ; Continue if still active
-    ; If idle, go back to wait for next burst 
-
-
+    ; Continuously sample at high speed - signals are normally HIGH with 75ns LOW pulses
+    ; Sample every 2 cycles (16ns at 125MHz) to catch 75ns pulses
+    in pins, 2 side 1      ; Sample (1 cycle + sideset)
+    in pins, 2 side 0      ; Sample (1 cycle)
+    in pins, 2 side 1      ; Sample
+    in pins, 2 side 0      ; Sample - 4 samples = 1 byte autopush
 
 .wrap
 
@@ -38,18 +18,13 @@ capture_loop:
 // this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
 
 void isosnoop_pio_setup(PIO pio, uint sm, uint offset, uint rx_pin_base, uint sampling_pin) {
-    // Initialize input pins as inputs with pull-ups for differential signals
-    gpio_init(rx_pin_base);
-    gpio_set_dir(rx_pin_base, GPIO_IN);
-    gpio_pull_up(rx_pin_base);  // Pull-up for idle HIGH state
+    // Enable pull-ups to match the normally-HIGH signals seen on scope
+    gpio_set_pulls(rx_pin_base, true, false);   // Pull-up enabled, pull-down disabled
+    gpio_set_pulls(rx_pin_base + 1, true, false);
     
-    gpio_init(rx_pin_base + 1);
-    gpio_set_dir(rx_pin_base + 1, GPIO_IN);
-    gpio_pull_up(rx_pin_base + 1);  // Pull-up for idle HIGH state
-
     pio_sm_config c = isosnoop_program_get_default_config(offset);
 
-    // Shift to right, autopush with threshold 8 (4 samples x 2 bits = 8 bits = 1 byte)
+    // Shift to right, autopush with threshold 8
     sm_config_set_in_shift(&c, false, true, 8);
     sm_config_set_in_pin_base(&c, rx_pin_base);
     sm_config_set_in_pin_count(&c, 2); // rx_pin_base and rx_pin_base+1

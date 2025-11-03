@@ -31,9 +31,9 @@
 #define CMD_READ_F      0x4C
 
 static uint dma_channel_rx;
-static char read_buffer[256] __attribute__((aligned(2048)));
+static char read_buffer[2048] __attribute__((aligned(2048)));  // Increased for continuous sampling
 static uint rx_pin_base_saved = 0;
-static uint8_t decoded_bytes[128];
+static uint8_t decoded_bytes[256];  // Increased to handle more decoded data
 static uint16_t decoded_count = 0;
 
 static void isosnoop_dma_setup(PIO pio, uint sm);
@@ -41,26 +41,71 @@ static void isosnoop_decode_manchester(uint8_t *samples, uint16_t sample_count);
 static const char* isosnoop_identify_command(uint16_t cmd);
 
 /**
+ * @brief Detect 260ns start pulse (frame synchronization)
+ * 
+ * The start pulse is 260ns wide, which is ~16 samples at our rate
+ * Regular data pulses are 75ns (~4-5 samples)
+ * 
+ * Returns: index of first sample after start pulse, or 0 if not found
+ */
+static uint16_t find_start_pulse(uint8_t *samples, uint16_t sample_count) {
+    uint8_t last_sample = 0xFF;
+    uint8_t run_length = 0;
+    
+    for (uint16_t byte_idx = 0; byte_idx < sample_count; byte_idx++) {
+        uint8_t sample_byte = samples[byte_idx];
+        
+        for (int sample_idx = 0; sample_idx < 4; sample_idx++) {
+            uint8_t sample = (sample_byte >> (6 - sample_idx*2)) & 0x03;
+            
+            // Skip idle (both HIGH)
+            if (sample == 0x03) {
+                run_length = 0;
+                continue;
+            }
+            
+            if (sample == last_sample) {
+                run_length++;
+                // 260ns ≈ 16 samples, look for run of 10+ (with margin)
+                if (run_length >= 10) {
+                    // Found start pulse! Return position after it
+                    uint16_t pos = byte_idx * 4 + sample_idx + 1;
+                    printf("[START PULSE DETECTED at sample %u]\n", pos);
+                    return pos / 4;  // Return byte index
+                }
+            } else {
+                run_length = 1;
+                last_sample = sample;
+            }
+        }
+    }
+    
+    return 0;  // No start pulse found
+}
+
+/**
  * @brief Decode Manchester-encoded samples to bytes
  * 
  * isoSPI uses differential Manchester encoding:
- * - Each bit consists of a transition pair
+ * - Start pulse: 260ns (16+ samples) for frame sync
+ * - Data pulses: 75ns (4-5 samples)
  * - H0 (01) = one differential state
  * - 1H (10) = opposite differential state
- * - Repeating same state = bit 0
- * - Alternating states = bit 1
- * 
- * Actually for isoSPI, looking at the patterns:
- * - Alternating H0,1H,H0,1H = likely a preamble or sync
- * - We need to decode pairs of samples into bits
  */
 static void isosnoop_decode_manchester(uint8_t *samples, uint16_t sample_count) {
     decoded_count = 0;
+    
+    // Look for 260ns start pulse
+    uint16_t start_byte = find_start_pulse(samples, sample_count);
+    if (start_byte == 0 && sample_count > 10) {
+        printf("[No start pulse found - decoding from beginning]\n");
+    }
+    
     uint8_t current_byte = 0;
     uint8_t bit_count = 0;
     
     // Extract all 2-bit samples into a continuous stream
-    for (uint16_t byte_idx = 0; byte_idx < sample_count; byte_idx++) {
+    for (uint16_t byte_idx = start_byte; byte_idx < sample_count; byte_idx++) {
         uint8_t sample_byte = samples[byte_idx];
         
         // Each byte has 4 samples (2 bits each)
@@ -198,7 +243,7 @@ void isosnoop_print_buffer(void) {
     uint32_t write_addr = dma_chan->write_addr;
     uint32_t bytes_captured = 0;
     bool has_data = false;
-    uint32_t max_bytes_to_show = 64;  // Show up to 64 bytes of samples
+    uint32_t max_bytes_to_show = 256;  // Show up to 256 bytes of samples (increased to catch full bursts)
     
     while(last_write_addr != write_addr && bytes_captured < max_bytes_to_show) {
         has_data = true;
@@ -239,21 +284,30 @@ void isosnoop_print_buffer(void) {
     if (has_data) {
         printf("\n[Captured %lu bytes of raw samples]\n", bytes_captured);
         
-        // Show raw hex dump for analysis
+        // Show raw hex dump for analysis - read from where we just read the data!
         printf("\nRaw hex: ");
-        uint32_t read_addr = (uint32_t)read_buffer;
-        for (uint32_t i = 0; i < bytes_captured && i < 64; i++) {
+        uint32_t read_addr = write_addr - bytes_captured;
+        // Handle ring buffer wrap
+        if (read_addr < (uint32_t)read_buffer) {
+            read_addr += sizeof(read_buffer);
+        }
+        
+        // Copy captured bytes to temp buffer for decoding
+        uint8_t temp_buffer[256];
+        uint32_t temp_addr = read_addr;
+        for (uint32_t i = 0; i < bytes_captured && i < 256; i++) {
+            temp_buffer[i] = *((uint8_t*)temp_addr);
             if (i % 16 == 0 && i > 0) printf("\n         ");
-            printf("%02X ", *((uint8_t*)read_addr));
-            read_addr++;
-            if (read_addr >= (uint32_t)(read_buffer + sizeof(read_buffer))) {
-                read_addr = (uint32_t)read_buffer;
+            printf("%02X ", temp_buffer[i]);
+            temp_addr++;
+            if (temp_addr >= (uint32_t)(read_buffer + sizeof(read_buffer))) {
+                temp_addr = (uint32_t)read_buffer;
             }
         }
         printf("\n");
         
-        // Decode Manchester encoding
-        isosnoop_decode_manchester((uint8_t*)read_buffer, bytes_captured);
+        // Decode Manchester encoding from temp buffer
+        isosnoop_decode_manchester(temp_buffer, bytes_captured);
         
         if (decoded_count > 0) {
             printf("\n=== DECODED isoSPI DATA ===\n");
