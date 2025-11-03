@@ -230,9 +230,10 @@ void system_init(void) {
     batman_init();
     
     // Initialize isoSPI snooper (passive monitoring of BATMan traffic)
-    // Set invert=0 for normally-HIGH signals, invert=1 if signals appear inverted
+    // Set invert=0 for normally-Low signals, invert=1 if signals appear inverted
+    // CL we want our signals inverted since they are normally high active low
     printf("Initializing isoSPI snooper...\n");
-    isosnoop_setup(ISOSPI_RX_PIN_BASE, 0, ISOSPI_SAMPLING_PIN);  // 0 = no inversion
+    isosnoop_setup(ISOSPI_RX_PIN_BASE, 1, ISOSPI_SAMPLING_PIN);  // 1 = inversion
     printf("isoSPI snooper initialized - monitoring BATMan traffic\n");
     
     // Initialize ADC for pack voltage monitoring
