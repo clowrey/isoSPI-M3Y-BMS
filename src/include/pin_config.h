@@ -15,7 +15,7 @@
 #define TESLA_BMS_PIN_MOSI      19       // GP19 - SPI0_MOSI
 #define TESLA_BMS_PIN_SCK       18       // GP18 - SPI0_SCK
 #define TESLA_BMS_PIN_CS        17       // GP17 - Chip Select (GPIO)
-#define TESLA_BMS_PIN_ENABLE    20       // GP20 - BMB Enable (Active LOW per ESP32)
+#define TESLA_BMS_PIN_ENABLE    22       // GP22 - BMB Enable (Active LOW per ESP32)
 
 // INA228 Current Sensor I2C Interface (I2C0)
 #define INA228_I2C_INST         i2c0
@@ -43,8 +43,10 @@
 #define ESPHOME_PIN_RX          1        // GP1 - UART0_RX
 
 // PWM Outputs for Contactor Control
-#define PWM_PIN_PACK_CONTACTORS 20       // GP20 - PWM2A
-#define PWM_PIN_PRECHARGE_RELAY 21       // GP21 - PWM2B
+#define PWM_PIN_LINK_POS_CONTACTOR  20   // GP20 - Positive Link Contactor
+#define PWM_PIN_LINK_NEG_CONTACTOR  21   // GP21 - Negative Link Contactor
+#define PWM_PIN_FC_POS_CONTACTOR    23   // GP23 - FC Positive Contactor
+#define PWM_PIN_FC_NEG_CONTACTOR    24   // GP24 - FC Negative Contactor
 #define PWM_FREQUENCY           10000    // 10 kHz PWM frequency
 #define PWM_DUTY_NORMAL         15       // 15% duty cycle
 #define PWM_DUTY_INITIAL        100      // 100% initial pulse
@@ -55,6 +57,12 @@
 #define CAN_PIN_TX              3        // GP3 - CAN TX
 #define CAN_PIO_NUM             0        // Use PIO0
 #define CAN_BITRATE             500000   // 500 kbps
+
+// isoSPI PIO Interface (PIO1) - Consecutive pins GP7-11
+#define ISOSPI_TX_PIN_BASE          7    // GP7=enable, GP8=data (GP7+1)
+#define ISOSPI_RX_PIN_BASE          9    // GP9=high, GP10=low (GP9+1, shared)
+#define ISOSPI_SAMPLING_PIN         11   // GP11 - debug output
+#define ISOSPI_PIO_NUM              1    // Use PIO1
 
 // Status LED (built-in)
 #define LED_PIN                 25       // GP25 - Built-in LED

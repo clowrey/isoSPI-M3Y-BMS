@@ -65,6 +65,13 @@ bool batman_get_register_debug(void);
 // State machine
 batman_state_t batman_get_state(void);
 
+// Enable/disable batman interface
+void batman_set_enabled(bool enabled);
+bool batman_is_enabled(void);
+
+// Test function (for unified BMB test)
+void batman_run_test_once(void);
+
 #ifdef __cplusplus
 }
 #endif

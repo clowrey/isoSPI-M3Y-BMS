@@ -22,6 +22,9 @@
 #include "adc_monitor.h"
 #include "coulomb_counter.h"
 #include "can_interface.h"
+#include "isospi_interface.h"
+#include "isosnoop.h"
+#include "bmb_test.h"
 
 // Blinking LED configuration
 #define BLINK_LED_PIN 39  // GP39 for RP2350
@@ -29,12 +32,18 @@
 
 // System state
 typedef struct {
-    bool pack_contactors_enabled;
-    bool precharge_relay_enabled;
-    uint32_t pack_contactors_start_time;
-    uint32_t precharge_relay_start_time;
-    bool initial_pulse_complete;
-    bool precharge_initial_pulse_complete;
+    bool link_neg_enabled;
+    bool link_pos_enabled;
+    bool fc_pos_enabled;  // FC Positive acts as precharge
+    bool fc_neg_enabled;
+    uint32_t link_neg_start_time;
+    uint32_t link_pos_start_time;
+    uint32_t fc_pos_start_time;
+    uint32_t fc_neg_start_time;
+    bool link_neg_initial_pulse_complete;
+    bool link_pos_initial_pulse_complete;
+    bool fc_pos_initial_pulse_complete;
+    bool fc_neg_initial_pulse_complete;
 } system_state_t;
 
 static system_state_t system_state = {0};
@@ -55,8 +64,10 @@ void uart_init_esphome(void);
 void i2c_init_ina228(void);
 void pwm_init_contactors(void);
 void process_command(const char* cmd);
-void set_contactor_pwm(uint8_t duty_percent);
-void set_precharge_pwm(uint8_t duty_percent);
+void set_link_neg_pwm(uint8_t duty_percent);
+void set_link_pos_pwm(uint8_t duty_percent);
+void set_fc_pos_pwm(uint8_t duty_percent);
+void set_fc_neg_pwm(uint8_t duty_percent);
 void update_system_state(void);
 void update_parameters(void);
 
@@ -71,6 +82,7 @@ int main() {
     printf("========================================\n");
     printf("  Tesla Model 3 BMS Interface\n");
     printf("  RP2350A + INA228 + Internal ADC\n");
+    printf("  Mode: BATMan + isoSPI Snooper\n");
     printf("========================================\n");
     printf("\n");
     
@@ -80,13 +92,16 @@ int main() {
     uint32_t last_display_update = 0;
     uint32_t last_blink = 0;
     uint32_t last_can_broadcast = 0;
+    uint32_t last_snoop_print = 0;
     bool blink_led_state = false;
     const uint32_t MAIN_LOOP_INTERVAL = 50;      // 50ms
     const uint32_t ESPHOME_UPDATE_INTERVAL = 1000;  // 1 second
     const uint32_t DISPLAY_UPDATE_INTERVAL = 5000;  // 5 seconds
     const uint32_t CAN_BROADCAST_INTERVAL = 100;  // 100ms (10Hz)
+    const uint32_t SNOOP_PRINT_INTERVAL = 500;   // 500ms for snooper output
     
     printf("System ready - entering main loop\n");
+    printf("BATMan running with isoSPI snooper monitoring traffic\n");
     printf("Type 'help' for available commands\n\n");
     
     while (true) {
@@ -103,8 +118,11 @@ int main() {
         if (now - last_main_loop >= MAIN_LOOP_INTERVAL) {
             last_main_loop = now;
             
-            // Run BATMan state machine
+            // CL: Run BATMan to generate isoSPI traffic for snooper to capture
             batman_loop();
+            
+            // BMB test loop (if continuous mode enabled)
+            bmb_test_loop();
             
             // Read pack voltages from internal ADC
             pack_voltage_t pack_voltages;
@@ -118,6 +136,13 @@ int main() {
             
             // Handle contactor PWM timing
             update_system_state();
+        }
+        
+        // Print isoSPI snooper data
+        if (now - last_snoop_print >= SNOOP_PRINT_INTERVAL) {
+            last_snoop_print = now;
+            printf("isoSPI: ");
+            isosnoop_print_buffer();
         }
         
         // Send data to ESPHome display
@@ -139,7 +164,8 @@ int main() {
             }
         }
         
-        // Display status on USB serial
+        // Display status on USB serial (disabled for now)
+        /*
         if (now - last_display_update >= DISPLAY_UPDATE_INTERVAL) {
             last_display_update = now;
             
@@ -152,6 +178,7 @@ int main() {
             printf("SOC: %.1f%%\n", param_get_float(PARAM_STATE_OF_CHARGE));
             printf("====================\n\n");
         }
+        */
         
         // Process USB serial commands
         int c = getchar_timeout_us(0);
@@ -199,8 +226,13 @@ void system_init(void) {
     // Initialize parameters
     param_init();
     
-    // Initialize BATMan BMS interface
+    // CL: Initialize BATMan - it will generate isoSPI traffic
     batman_init();
+    
+    // Initialize isoSPI snooper (passive monitoring of BATMan traffic)
+    printf("Initializing isoSPI snooper...\n");
+    isosnoop_setup(ISOSPI_RX_PIN_BASE, ISOSPI_SAMPLING_PIN);
+    printf("isoSPI snooper initialized - monitoring BATMan traffic\n");
     
     // Initialize ADC for pack voltage monitoring
     adc_monitor_init();
@@ -283,48 +315,84 @@ void i2c_init_ina228(void) {
  * @brief Initialize PWM for contactor control
  */
 void pwm_init_contactors(void) {
-    // Configure pack contactors PWM
-    gpio_set_function(PWM_PIN_PACK_CONTACTORS, GPIO_FUNC_PWM);
-    uint slice_num_pack = pwm_gpio_to_slice_num(PWM_PIN_PACK_CONTACTORS);
-    
-    // Set PWM frequency
+    // Calculate PWM frequency divider
     float clk_div = (float)clock_get_hz(clk_sys) / (PWM_FREQUENCY * 256);
-    pwm_set_clkdiv(slice_num_pack, clk_div);
-    pwm_set_wrap(slice_num_pack, 255);
-    pwm_set_gpio_level(PWM_PIN_PACK_CONTACTORS, 0);
-    pwm_set_enabled(slice_num_pack, true);
     
-    // Configure precharge relay PWM
-    gpio_set_function(PWM_PIN_PRECHARGE_RELAY, GPIO_FUNC_PWM);
-    uint slice_num_precharge = pwm_gpio_to_slice_num(PWM_PIN_PRECHARGE_RELAY);
+    // Configure Link Negative Contactor PWM
+    gpio_set_function(PWM_PIN_LINK_NEG_CONTACTOR, GPIO_FUNC_PWM);
+    uint slice_num_link_neg = pwm_gpio_to_slice_num(PWM_PIN_LINK_NEG_CONTACTOR);
+    pwm_set_clkdiv(slice_num_link_neg, clk_div);
+    pwm_set_wrap(slice_num_link_neg, 255);
+    pwm_set_gpio_level(PWM_PIN_LINK_NEG_CONTACTOR, 0);
+    pwm_set_enabled(slice_num_link_neg, true);
     
-    pwm_set_clkdiv(slice_num_precharge, clk_div);
-    pwm_set_wrap(slice_num_precharge, 255);
-    pwm_set_gpio_level(PWM_PIN_PRECHARGE_RELAY, 0);
-    pwm_set_enabled(slice_num_precharge, true);
+    // Configure Link Positive Contactor PWM
+    gpio_set_function(PWM_PIN_LINK_POS_CONTACTOR, GPIO_FUNC_PWM);
+    uint slice_num_link_pos = pwm_gpio_to_slice_num(PWM_PIN_LINK_POS_CONTACTOR);
+    pwm_set_clkdiv(slice_num_link_pos, clk_div);
+    pwm_set_wrap(slice_num_link_pos, 255);
+    pwm_set_gpio_level(PWM_PIN_LINK_POS_CONTACTOR, 0);
+    pwm_set_enabled(slice_num_link_pos, true);
     
-    printf("PWM: Initialized at %d Hz (Pack=GP%d, Precharge=GP%d)\n", 
-           PWM_FREQUENCY, PWM_PIN_PACK_CONTACTORS, PWM_PIN_PRECHARGE_RELAY);
+    // Configure FC Positive Contactor PWM (Precharge)
+    gpio_set_function(PWM_PIN_FC_POS_CONTACTOR, GPIO_FUNC_PWM);
+    uint slice_num_fc_pos = pwm_gpio_to_slice_num(PWM_PIN_FC_POS_CONTACTOR);
+    pwm_set_clkdiv(slice_num_fc_pos, clk_div);
+    pwm_set_wrap(slice_num_fc_pos, 255);
+    pwm_set_gpio_level(PWM_PIN_FC_POS_CONTACTOR, 0);
+    pwm_set_enabled(slice_num_fc_pos, true);
+    
+    // Configure FC Negative Contactor PWM
+    gpio_set_function(PWM_PIN_FC_NEG_CONTACTOR, GPIO_FUNC_PWM);
+    uint slice_num_fc_neg = pwm_gpio_to_slice_num(PWM_PIN_FC_NEG_CONTACTOR);
+    pwm_set_clkdiv(slice_num_fc_neg, clk_div);
+    pwm_set_wrap(slice_num_fc_neg, 255);
+    pwm_set_gpio_level(PWM_PIN_FC_NEG_CONTACTOR, 0);
+    pwm_set_enabled(slice_num_fc_neg, true);
+    
+    printf("PWM: Initialized at %d Hz\n", PWM_FREQUENCY);
+    printf("  Link Neg=GP%d, Link Pos=GP%d\n", PWM_PIN_LINK_NEG_CONTACTOR, PWM_PIN_LINK_POS_CONTACTOR);
+    printf("  FC Pos=GP%d, FC Neg=GP%d\n", PWM_PIN_FC_POS_CONTACTOR, PWM_PIN_FC_NEG_CONTACTOR);
 }
 
 /**
- * @brief Set pack contactor PWM duty cycle
+ * @brief Set Link Negative Contactor PWM duty cycle
  */
-void set_contactor_pwm(uint8_t duty_percent) {
+void set_link_neg_pwm(uint8_t duty_percent) {
     if (duty_percent > 100) duty_percent = 100;
     uint16_t level = (duty_percent * 255) / 100;
-    pwm_set_gpio_level(PWM_PIN_PACK_CONTACTORS, level);
-    printf("Pack Contactors: %d%% duty cycle\n", duty_percent);
+    pwm_set_gpio_level(PWM_PIN_LINK_NEG_CONTACTOR, level);
+    printf("Link Neg Contactor: %d%% duty cycle\n", duty_percent);
 }
 
 /**
- * @brief Set precharge relay PWM duty cycle
+ * @brief Set Link Positive Contactor PWM duty cycle
  */
-void set_precharge_pwm(uint8_t duty_percent) {
+void set_link_pos_pwm(uint8_t duty_percent) {
     if (duty_percent > 100) duty_percent = 100;
     uint16_t level = (duty_percent * 255) / 100;
-    pwm_set_gpio_level(PWM_PIN_PRECHARGE_RELAY, level);
-    printf("Precharge Relay: %d%% duty cycle\n", duty_percent);
+    pwm_set_gpio_level(PWM_PIN_LINK_POS_CONTACTOR, level);
+    printf("Link Pos Contactor: %d%% duty cycle\n", duty_percent);
+}
+
+/**
+ * @brief Set FC Positive Contactor (Precharge) PWM duty cycle
+ */
+void set_fc_pos_pwm(uint8_t duty_percent) {
+    if (duty_percent > 100) duty_percent = 100;
+    uint16_t level = (duty_percent * 255) / 100;
+    pwm_set_gpio_level(PWM_PIN_FC_POS_CONTACTOR, level);
+    printf("FC Pos Contactor (Precharge): %d%% duty cycle\n", duty_percent);
+}
+
+/**
+ * @brief Set FC Negative Contactor PWM duty cycle
+ */
+void set_fc_neg_pwm(uint8_t duty_percent) {
+    if (duty_percent > 100) duty_percent = 100;
+    uint16_t level = (duty_percent * 255) / 100;
+    pwm_set_gpio_level(PWM_PIN_FC_NEG_CONTACTOR, level);
+    printf("FC Neg Contactor: %d%% duty cycle\n", duty_percent);
 }
 
 /**
@@ -333,19 +401,35 @@ void set_precharge_pwm(uint8_t duty_percent) {
 void update_system_state(void) {
     uint32_t now = to_ms_since_boot(get_absolute_time());
     
-    // Handle pack contactors initial pulse timing
-    if (system_state.pack_contactors_enabled && !system_state.initial_pulse_complete) {
-        if (now - system_state.pack_contactors_start_time >= PWM_INITIAL_PULSE_MS) {
-            set_contactor_pwm(PWM_DUTY_NORMAL);
-            system_state.initial_pulse_complete = true;
+    // Handle Link Negative Contactor initial pulse timing
+    if (system_state.link_neg_enabled && !system_state.link_neg_initial_pulse_complete) {
+        if (now - system_state.link_neg_start_time >= PWM_INITIAL_PULSE_MS) {
+            set_link_neg_pwm(PWM_DUTY_NORMAL);
+            system_state.link_neg_initial_pulse_complete = true;
         }
     }
     
-    // Handle precharge relay initial pulse timing
-    if (system_state.precharge_relay_enabled && !system_state.precharge_initial_pulse_complete) {
-        if (now - system_state.precharge_relay_start_time >= PWM_INITIAL_PULSE_MS) {
-            set_precharge_pwm(PWM_DUTY_NORMAL);
-            system_state.precharge_initial_pulse_complete = true;
+    // Handle Link Positive Contactor initial pulse timing
+    if (system_state.link_pos_enabled && !system_state.link_pos_initial_pulse_complete) {
+        if (now - system_state.link_pos_start_time >= PWM_INITIAL_PULSE_MS) {
+            set_link_pos_pwm(PWM_DUTY_NORMAL);
+            system_state.link_pos_initial_pulse_complete = true;
+        }
+    }
+    
+    // Handle FC Positive Contactor (Precharge) initial pulse timing
+    if (system_state.fc_pos_enabled && !system_state.fc_pos_initial_pulse_complete) {
+        if (now - system_state.fc_pos_start_time >= PWM_INITIAL_PULSE_MS) {
+            set_fc_pos_pwm(PWM_DUTY_NORMAL);
+            system_state.fc_pos_initial_pulse_complete = true;
+        }
+    }
+    
+    // Handle FC Negative Contactor initial pulse timing
+    if (system_state.fc_neg_enabled && !system_state.fc_neg_initial_pulse_complete) {
+        if (now - system_state.fc_neg_start_time >= PWM_INITIAL_PULSE_MS) {
+            set_fc_neg_pwm(PWM_DUTY_NORMAL);
+            system_state.fc_neg_initial_pulse_complete = true;
         }
     }
 }
@@ -391,18 +475,34 @@ void process_command(const char* cmd) {
     
     // Process commands
     if (strcmp(lower_cmd, "help") == 0) {
+        printf("\n=================================================\n");
+        printf("  BATMan + isoSPI Snooper - Traffic Monitoring\n");
+        printf("=================================================\n");
         printf("\nAvailable commands:\n");
         printf("  help                - Show this help message\n");
         printf("  status              - Show system status\n");
         printf("  balance on/off      - Enable/disable cell balancing\n");
-        printf("  contactors on/off   - Enable/disable pack contactors\n");
-        printf("  precharge on/off    - Enable/disable precharge relay\n");
+        printf("  contactors on/off   - Enable/disable all contactors (sequenced)\n");
+        printf("  link_neg on/off     - Enable/disable Link Negative contactor\n");
+        printf("  link_pos on/off     - Enable/disable Link Positive contactor\n");
+        printf("  fc_pos on/off       - Enable/disable FC Positive (precharge) contactor\n");
+        printf("  fc_neg on/off       - Enable/disable FC Negative contactor\n");
         printf("  params              - List all parameters\n");
         printf("  ina228              - Show INA228 status\n");
         printf("  adc                 - Show ADC voltages\n");
         printf("  coulomb             - Show coulomb counter status\n");
         printf("  batman              - Show BATMan status\n");
-        printf("  can                 - Show CAN bus statistics\n\n");
+        printf("  can                 - Show CAN bus statistics\n");
+        printf("  isospi init         - Initialize isoSPI interface\n");
+        printf("  isospi enable       - Switch to isoSPI master (disable Batman)\n");
+        printf("  batman enable       - Switch to Batman (disable isoSPI)\n");
+        printf("  isospi test         - Run isoSPI test pattern\n");
+        printf("  isospi snoop        - Print captured bus traffic\n");
+        printf("  isospi status       - Show isoSPI interface status\n");
+        printf("  snoop diag          - Show snooper diagnostics and pin states\n");
+        printf("  bmb test            - Run BMB test once (uses active interface)\n");
+        printf("  bmb continuous on   - Enable continuous BMB testing\n");
+        printf("  bmb continuous off  - Disable continuous BMB testing\n\n");
     }
     else if (strcmp(lower_cmd, "status") == 0) {
         printf("\n=== System Status ===\n");
@@ -412,8 +512,10 @@ void process_command(const char* cmd) {
         printf("Current: %.3f A\n", param_get_float(PARAM_CURRENT));
         printf("Power: %.1f W\n", param_get_float(PARAM_POWER_WATTS));
         printf("SOC: %.1f%%\n", param_get_float(PARAM_STATE_OF_CHARGE));
-        printf("Contactors: %s\n", system_state.pack_contactors_enabled ? "ON" : "OFF");
-        printf("Precharge: %s\n", system_state.precharge_relay_enabled ? "ON" : "OFF");
+        printf("Link Neg: %s\n", system_state.link_neg_enabled ? "ON" : "OFF");
+        printf("Link Pos: %s\n", system_state.link_pos_enabled ? "ON" : "OFF");
+        printf("FC Pos (Precharge): %s\n", system_state.fc_pos_enabled ? "ON" : "OFF");
+        printf("FC Neg: %s\n", system_state.fc_neg_enabled ? "ON" : "OFF");
         printf("====================\n\n");
     }
     else if (strcmp(lower_cmd, "balance on") == 0) {
@@ -427,30 +529,100 @@ void process_command(const char* cmd) {
         printf("Balance DISABLED\n");
     }
     else if (strcmp(lower_cmd, "contactors on") == 0) {
-        system_state.pack_contactors_enabled = true;
-        system_state.pack_contactors_start_time = to_ms_since_boot(get_absolute_time());
-        system_state.initial_pulse_complete = false;
-        set_contactor_pwm(PWM_DUTY_INITIAL);
-        printf("Pack Contactors ENABLED\n");
+        // CL: Sequenced contactor activation: Link Neg → FC Pos (precharge) → Link Pos
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        
+        // Enable Link Negative first
+        system_state.link_neg_enabled = true;
+        system_state.link_neg_start_time = now;
+        system_state.link_neg_initial_pulse_complete = false;
+        set_link_neg_pwm(PWM_DUTY_INITIAL);
+        
+        // Enable FC Positive (Precharge) after 50ms delay
+        sleep_ms(50);
+        now = to_ms_since_boot(get_absolute_time());
+        system_state.fc_pos_enabled = true;
+        system_state.fc_pos_start_time = now;
+        system_state.fc_pos_initial_pulse_complete = false;
+        set_fc_pos_pwm(PWM_DUTY_INITIAL);
+        
+        // Enable Link Positive after additional 500ms precharge delay
+        sleep_ms(500);
+        now = to_ms_since_boot(get_absolute_time());
+        system_state.link_pos_enabled = true;
+        system_state.link_pos_start_time = now;
+        system_state.link_pos_initial_pulse_complete = false;
+        set_link_pos_pwm(PWM_DUTY_INITIAL);
+        
+        printf("All Contactors ENABLED (Sequenced: Link Neg → FC Pos → Link Pos)\n");
     }
     else if (strcmp(lower_cmd, "contactors off") == 0) {
-        system_state.pack_contactors_enabled = false;
-        system_state.initial_pulse_complete = false;
-        set_contactor_pwm(0);
-        printf("Pack Contactors DISABLED\n");
+        // CL: Disable all contactors
+        system_state.link_neg_enabled = false;
+        system_state.link_pos_enabled = false;
+        system_state.fc_pos_enabled = false;
+        system_state.fc_neg_enabled = false;
+        system_state.link_neg_initial_pulse_complete = false;
+        system_state.link_pos_initial_pulse_complete = false;
+        system_state.fc_pos_initial_pulse_complete = false;
+        system_state.fc_neg_initial_pulse_complete = false;
+        set_link_neg_pwm(0);
+        set_link_pos_pwm(0);
+        set_fc_pos_pwm(0);
+        set_fc_neg_pwm(0);
+        printf("All Contactors DISABLED\n");
     }
-    else if (strcmp(lower_cmd, "precharge on") == 0) {
-        system_state.precharge_relay_enabled = true;
-        system_state.precharge_relay_start_time = to_ms_since_boot(get_absolute_time());
-        system_state.precharge_initial_pulse_complete = false;
-        set_precharge_pwm(PWM_DUTY_INITIAL);
-        printf("Precharge Relay ENABLED\n");
+    else if (strcmp(lower_cmd, "link_neg on") == 0) {
+        system_state.link_neg_enabled = true;
+        system_state.link_neg_start_time = to_ms_since_boot(get_absolute_time());
+        system_state.link_neg_initial_pulse_complete = false;
+        set_link_neg_pwm(PWM_DUTY_INITIAL);
+        printf("Link Neg Contactor ENABLED\n");
     }
-    else if (strcmp(lower_cmd, "precharge off") == 0) {
-        system_state.precharge_relay_enabled = false;
-        system_state.precharge_initial_pulse_complete = false;
-        set_precharge_pwm(0);
-        printf("Precharge Relay DISABLED\n");
+    else if (strcmp(lower_cmd, "link_neg off") == 0) {
+        system_state.link_neg_enabled = false;
+        system_state.link_neg_initial_pulse_complete = false;
+        set_link_neg_pwm(0);
+        printf("Link Neg Contactor DISABLED\n");
+    }
+    else if (strcmp(lower_cmd, "link_pos on") == 0) {
+        system_state.link_pos_enabled = true;
+        system_state.link_pos_start_time = to_ms_since_boot(get_absolute_time());
+        system_state.link_pos_initial_pulse_complete = false;
+        set_link_pos_pwm(PWM_DUTY_INITIAL);
+        printf("Link Pos Contactor ENABLED\n");
+    }
+    else if (strcmp(lower_cmd, "link_pos off") == 0) {
+        system_state.link_pos_enabled = false;
+        system_state.link_pos_initial_pulse_complete = false;
+        set_link_pos_pwm(0);
+        printf("Link Pos Contactor DISABLED\n");
+    }
+    else if (strcmp(lower_cmd, "fc_pos on") == 0) {
+        system_state.fc_pos_enabled = true;
+        system_state.fc_pos_start_time = to_ms_since_boot(get_absolute_time());
+        system_state.fc_pos_initial_pulse_complete = false;
+        set_fc_pos_pwm(PWM_DUTY_INITIAL);
+        printf("FC Pos Contactor (Precharge) ENABLED\n");
+    }
+    else if (strcmp(lower_cmd, "fc_pos off") == 0) {
+        system_state.fc_pos_enabled = false;
+        system_state.fc_pos_initial_pulse_complete = false;
+        set_fc_pos_pwm(0);
+        printf("FC Pos Contactor (Precharge) DISABLED\n");
+    }
+    else if (strcmp(lower_cmd, "fc_neg on") == 0) {
+        system_state.fc_neg_enabled = true;
+        system_state.fc_neg_start_time = to_ms_since_boot(get_absolute_time());
+        system_state.fc_neg_initial_pulse_complete = false;
+        set_fc_neg_pwm(PWM_DUTY_INITIAL);
+        printf("FC Neg Contactor ENABLED\n");
+    }
+    else if (strcmp(lower_cmd, "fc_neg off") == 0) {
+        system_state.fc_neg_enabled = false;
+        system_state.fc_neg_initial_pulse_complete = false;
+        set_fc_neg_pwm(0);
+        printf("FC Neg Contactor DISABLED\n");
     }
     else if (strcmp(lower_cmd, "params") == 0) {
         param_print_all();
@@ -483,6 +655,59 @@ void process_command(const char* cmd) {
         printf("TX Messages: %lu\n", tx_count);
         printf("Errors: %lu\n", error_count);
         printf("========================\n\n");
+    }
+    else if (strcmp(lower_cmd, "isospi init") == 0) {
+        isospi_interface_init();
+    }
+    else if (strcmp(lower_cmd, "isospi enable") == 0) {
+        isospi_interface_enable();
+    }
+    else if (strcmp(lower_cmd, "batman enable") == 0) {
+        isospi_interface_disable();
+    }
+    else if (strcmp(lower_cmd, "isospi test") == 0) {
+        isospi_interface_test();
+    }
+    else if (strcmp(lower_cmd, "isospi snoop") == 0) {
+        isospi_interface_print_snoop();
+    }
+    else if (strcmp(lower_cmd, "isospi status") == 0) {
+        isospi_interface_print_status();
+    }
+    else if (strcmp(lower_cmd, "snoop diag") == 0) {
+        printf("\n=== isoSPI Snooper Diagnostics ===\n");
+        uint32_t buffer_addr, dma_addr;
+        bool pio_running;
+        isosnoop_get_stats(&buffer_addr, &dma_addr, &pio_running);
+        
+        printf("PIO Status: %s\n", pio_running ? "RUNNING" : "STOPPED");
+        printf("Buffer Address: 0x%08lx\n", buffer_addr);
+        printf("DMA Write Address: 0x%08lx\n", dma_addr);
+        printf("Bytes Written: %ld\n", dma_addr - buffer_addr);
+        
+        printf("\nPin States (GP9=high, GP10=low):\n");
+        for (int i = 0; i < 20; i++) {
+            uint8_t pins = isosnoop_read_pins();
+            printf("  Sample %2d: GP9=%d GP10=%d (0b%d%d)\n", 
+                   i, (pins >> 1) & 1, pins & 1, (pins >> 1) & 1, pins & 1);
+            sleep_ms(10);
+        }
+        printf("================================\n\n");
+    }
+    else if (strcmp(lower_cmd, "bmb test") == 0) {
+        bmb_test_run_once();
+    }
+    else if (strcmp(lower_cmd, "bmb continuous on") == 0) {
+        // CL: Disable batman automatic loop when using manual BMB test
+        batman_set_enabled(false);
+        bmb_test_set_continuous(true);
+    }
+    else if (strcmp(lower_cmd, "bmb continuous off") == 0) {
+        bmb_test_set_continuous(false);
+        // CL: Re-enable batman loop if using batman interface
+        if (isospi_interface_get_active() == INTERFACE_BATMAN) {
+            batman_set_enabled(true);
+        }
     }
     else {
         printf("Unknown command: '%s'\n", cmd);

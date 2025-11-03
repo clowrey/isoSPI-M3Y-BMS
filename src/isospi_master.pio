@@ -1,0 +1,161 @@
+.pio_version 0 // only requires PIO version 0
+
+; Patterns when testing
+;.define tx_high 0b10
+;.define tx_low  0b01
+;.define tx_idle 0b00
+
+; Actual patterns when using a driver
+.define tx_high 0b11
+.define tx_low  0b10
+.define tx_idle 0b00
+
+
+.program isospi_master
+.wrap_target
+
+    ; wait for a byte before we start (we'll junk it)
+    out y, 8
+
+    ; do the chip select pattern
+    set pins tx_high [31]
+    set pins tx_low  [31]
+    set pins tx_idle [31]
+
+    ;set y, 31
+    ; delay after chip select
+start_wait:
+    jmp y-- start_wait
+
+    ; TRANSMIT PHASE
+
+do_bit:
+
+    ; read a bit
+    out x, 1
+
+    jmp !x zero_bit
+
+    ; output a 1
+    set pins, tx_high [15]
+    set pins, tx_low  [15]
+    jmp done
+
+    ; cheeky void space
+
+zero_bit:
+    ; output a 0
+    set pins, tx_low  [15]
+    set pins, tx_high [15]
+
+done:
+    ; go idle and wait for the lines to settle
+    set pins, tx_idle [15]
+    
+    ; RECV PHASE
+    ; unfortunately our bit-wait loop is 3 cycles long, so our sampling is going to be rather sloppy...
+
+    ; other options:
+    ; - OR the inputs externally into another input, and jmp pin (gets it down to 2 cycles?)
+
+
+    ; simulate a delay before the reply
+    nop [30]
+    nop [18]
+
+    ; count down waiting for a reply
+    set y, 30
+recv_wait:
+    ; read the two input pins
+    mov x, pins
+    ; if nonzero, we got something
+    jmp x-- recv_started
+    ; keep waiting
+    jmp y-- recv_wait
+
+    ; no reply, store zeroes
+    in null, 4
+    jmp recv_done[1]
+
+recv_started:
+
+    ; wait a bit before sampling twice
+    nop [3]
+    ; first sample
+    in pins, 2 [14]
+    ; second sample
+    in pins, 2 [30]
+
+
+recv_done:
+
+    ; just keep doing bits now
+    jmp do_bit
+
+
+    ; if there is still data in the buffer, go round again
+    ;jmp !osre do_bit
+
+    ; some more chances to continue before we end the transaction
+    ;jmp !osre do_bit [31]
+    ;jmp !osre do_bit [31]
+    ;jmp !osre do_bit [31]
+
+    nop
+    nop
+    nop
+    nop
+
+    ; end chip select (this is a jump target)
+    set pins tx_low  [31]
+    set pins tx_high [31]
+    set pins tx_idle [31]
+
+.wrap
+
+
+% c-sdk {
+// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+
+void isospi_master_program_init(PIO pio, uint sm, uint offset, uint tx_pin_base, uint rx_pin_base) {
+    // Outputs
+    pio_gpio_init(pio, tx_pin_base);
+    pio_gpio_init(pio, tx_pin_base + 1);
+
+    // Inputs (we don't need the pio to own these)
+    gpio_init(rx_pin_base);
+    gpio_set_dir(rx_pin_base, GPIO_IN);
+    gpio_pull_up(rx_pin_base);
+
+    gpio_init(rx_pin_base + 1);
+    gpio_set_dir(rx_pin_base + 1, GPIO_IN);
+    gpio_pull_up(rx_pin_base + 1);
+
+    // invert both RX pins
+    gpio_set_inover(rx_pin_base, GPIO_OVERRIDE_INVERT);
+    gpio_set_inover(rx_pin_base + 1, GPIO_OVERRIDE_INVERT);
+
+    // Set outputs as PIO outputs
+    pio_sm_set_consecutive_pindirs(pio, sm, tx_pin_base, 2, true);
+    
+    //pio_sm_set_consecutive_pindirs(pio, sm, 2, 2, false); // GPIO 2+3 as input
+
+    pio_sm_config c = isospi_master_program_get_default_config(offset);
+
+    // Shift to right, autopull with threshold 8
+    sm_config_set_out_shift(&c, false, true, 8);
+    sm_config_set_set_pins(&c, tx_pin_base, 2);
+
+    // Shift to right, autopush with threshold 32
+    sm_config_set_in_shift(&c, false, true, 32);
+    sm_config_set_in_pin_base(&c, rx_pin_base);
+    sm_config_set_in_pin_count(&c, rx_pin_base);
+
+    //sm_config_set_clkdiv_int_frac8(&c, 2, 0);
+
+    //sm_config_set_set_pins(&c, rts_pin, 1);
+
+    pio_sm_init(pio, sm, offset, &c);
+}
+%}
+

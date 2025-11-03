@@ -51,8 +51,16 @@ add_executable(tesla_bms_rp2350
     src/adc_monitor.c
     src/coulomb_counter.c
     src/can_interface.c
+    src/isospi_master.c
+    src/isosnoop.c
+    src/isospi_interface.c
+    src/bmb_test.c
     can2040/src/can2040.c
 )
+
+# Generate PIO headers for isoSPI interface
+pico_generate_pio_header(tesla_bms_rp2350 ${CMAKE_CURRENT_LIST_DIR}/src/isospi_master.pio)
+pico_generate_pio_header(tesla_bms_rp2350 ${CMAKE_CURRENT_LIST_DIR}/src/isosnoop.pio)
 
 # Link libraries
 target_link_libraries(tesla_bms_rp2350

@@ -39,6 +39,7 @@ static bool balance_enabled = false;
 static bool register_debug_enabled = false;
 static uint16_t loop_state = 0;
 static uint16_t idle_count = 0;
+static bool batman_enabled = true;  // CL: Control whether batman loop runs
 
 // Cell voltage storage (8 BMBs x 15 cells max)
 static uint16_t cell_voltages[MAX_CELLS];
@@ -397,86 +398,19 @@ static void batman_simple_test(void) {
     
     printf("\n=== BMS READ COMPLETE ===\n");
     
-    // Print command sequence that was sent
-    printf("\n=== COMMAND SEQUENCE SENT ===\n");
-    printf("Commands sent in order (MSB first, high byte first):\n\n");
-    
-    // Command 1: WAKEUP
-    printf("1. WAKEUP command:     0x%04X (CMD_WAKEUP)\n", CMD_WAKEUP);
-    printf("   Byte 1: 0x%02X = 0b%08b\n", (CMD_WAKEUP >> 8) & 0xFF, (CMD_WAKEUP >> 8) & 0xFF);
-    printf("   Byte 2: 0x%02X = 0b%08b\n", CMD_WAKEUP & 0xFF, CMD_WAKEUP & 0xFF);
-    printf("   → Delay: 120 μs\n\n");
-    
-    // Command 2: IDLE_WAKE
-    printf("2. IDLE_WAKE command:  0x%04X (CMD_IDLE_WAKE)\n", CMD_IDLE_WAKE);
-    printf("   Byte 1: 0x%02X = 0b%08b\n", (CMD_IDLE_WAKE >> 8) & 0xFF, (CMD_IDLE_WAKE >> 8) & 0xFF);
-    printf("   Byte 2: 0x%02X = 0b%08b\n", CMD_IDLE_WAKE & 0xFF, CMD_IDLE_WAKE & 0xFF);
-    printf("   → Delay: 70 μs\n\n");
-    
-    // Command 3: SNAPSHOT
-    printf("3. SNAPSHOT command:   0x%04X (CMD_SNAPSHOT)\n", CMD_SNAPSHOT);
-    printf("   Byte 1: 0x%02X = 0b%08b\n", (CMD_SNAPSHOT >> 8) & 0xFF, (CMD_SNAPSHOT >> 8) & 0xFF);
-    printf("   Byte 2: 0x%02X = 0b%08b\n", CMD_SNAPSHOT & 0xFF, CMD_SNAPSHOT & 0xFF);
-    printf("   → No delay\n\n");
-    
-    // Command 4: READ_A
-    uint8_t crc = batman_calc_crc((uint8_t[]){CMD_READ_A, 0x00}, 2);
-    printf("4. READ_A command:     0x%02X00 (CMD_READ_A)\n", CMD_READ_A);
-    printf("   Byte 1: 0x%02X = 0b%08b (command)\n", CMD_READ_A, CMD_READ_A);
-    printf("   Byte 2: 0x00 = 0b00000000\n");
-    printf("   Byte 3: 0x%02X = 0b%08b (CRC)\n", crc, crc);
-    printf("   Byte 4: 0x00 = 0b00000000\n");
-    printf("   → Then 72 bytes read from response\n");
-    printf("==============================\n");
-    
-    printf("\n=== RAW RESPONSE (first BMB only) ===\n");
-    printf("Register A (0x47) format per BMB: 9 bytes per BMB\n");
-    printf("Format: [Cell0_L Cell0_H] [Cell1_L Cell1_H] [Cell2_L Cell2_H] [Extra 3 bytes]\n");
-    printf("Each cell = 2 bytes (little endian)\n\n");
-    
-    // Only print BMB 0 with binary format
-    int i = 0;
-    printf("BMB %d raw bytes (hex and binary):\n", i/9);
-    
-    // Cell 0 (bytes 0-1)
-    printf("  Cell 0: [Low  0x%02X = 0b%08b] [High 0x%02X = 0b%08b]\n", 
-           response_buffer[i], response_buffer[i], 
-           response_buffer[i+1], response_buffer[i+1]);
-    
-    // Cell 1 (bytes 2-3)
-    printf("  Cell 1: [Low  0x%02X = 0b%08b] [High 0x%02X = 0b%08b]\n", 
-           response_buffer[i+2], response_buffer[i+2], 
-           response_buffer[i+3], response_buffer[i+3]);
-    
-    // Cell 2 (bytes 4-5)
-    printf("  Cell 2: [Low  0x%02X = 0b%08b] [High 0x%02X = 0b%08b]\n", 
-           response_buffer[i+4], response_buffer[i+4], 
-           response_buffer[i+5], response_buffer[i+5]);
-    
-    // Extra bytes (6-8)
-    printf("  Extra:  [0x%02X = 0b%08b] [0x%02X = 0b%08b] [0x%02X = 0b%08b]\n", 
-           response_buffer[i+6], response_buffer[i+6],
-           response_buffer[i+7], response_buffer[i+7],
-           response_buffer[i+8], response_buffer[i+8]);
-    
-    printf("\n=== DECODED VOLTAGES ===\n");
-    printf("Register A contains cells 0-2 (showing BMB 0 only):\n\n");
-    
+    // Simplified output - just show BMB 0 cell voltages
     int valid_cells = 0;
-    // Only decode and print BMB 0
     int bmb = 0;
-    printf("BMB %d:\n", bmb);
+    
+    printf("BMB0: ");
     for (int cell = 0; cell <= 2; cell++) {  // Cells 0-2
         int idx = (bmb * 9) + (cell * 2);
         if (idx + 1 < 72) {
             uint16_t tempvol = response_buffer[idx + 1] * 256 + response_buffer[idx];
             
-            printf("  Cell %d: [%02X %02X] = 0x%04X", 
-                   cell, response_buffer[idx], response_buffer[idx+1], tempvol);
-            
             if (tempvol != 0xFFFF && tempvol != 0x0000) {
                 uint16_t voltage_mv = tempvol / 12.5;
-                printf(" → %d mV (%.3f V) ✓\n", voltage_mv, voltage_mv / 1000.0f);
+                printf("C%d=%.3fV ", cell, voltage_mv / 1000.0f);
                 
                 // Store in voltage array
                 voltage_array[bmb][cell] = voltage_mv;
@@ -487,21 +421,16 @@ static void batman_simple_test(void) {
                     param_set_float(PARAM_U1, (float)voltage_mv);
                 }
             } else {
-                printf(" → INVALID\n");
+                printf("C%d=INV ", cell);
             }
         }
     }
-    printf("\n");
     
-    printf("=== SUMMARY ===\n");
-    printf("Valid cells found: %d\n", valid_cells);
     if (valid_cells > 0) {
-        printf("✓ SUCCESS - Data decoded!\n");
+        printf("✓\n");
     } else {
-        printf("✗ FAILED - No valid cell data\n");
+        printf("✗\n");
     }
-    
-    printf("===============================================\n\n");
 }
 
 /**
@@ -519,7 +448,7 @@ static void batman_state_machine(void) {
             if (idle_count > 20) {  // ~2 seconds at 100ms loop
                 loop_state = 0;
                 idle_count = 0;
-                printf("\n=== Repeating test in 2 seconds... ===\n");
+                // Test will repeat in 2 seconds
             }
             break;
             
@@ -533,6 +462,11 @@ static void batman_state_machine(void) {
  * @brief Main BATMan loop (called every 100ms from main)
  */
 void batman_loop(void) {
+    // CL: Don't run if batman is disabled (e.g., when isoSPI is active)
+    if (!batman_enabled) {
+        return;
+    }
+    
     static uint32_t last_update = 0;
     static bool initialized = false;
     uint32_t now = to_ms_since_boot(get_absolute_time());
@@ -672,5 +606,27 @@ bool batman_get_register_debug(void) {
  */
 batman_state_t batman_get_state(void) {
     return current_state;
+}
+
+/**
+ * @brief Set batman enabled/disabled
+ */
+void batman_set_enabled(bool enabled) {
+    batman_enabled = enabled;
+    printf("BATMan: %s\n", enabled ? "ENABLED" : "DISABLED");
+}
+
+/**
+ * @brief Get batman enabled status
+ */
+bool batman_is_enabled(void) {
+    return batman_enabled;
+}
+
+/**
+ * @brief Run batman test once (exported for bmb_test)
+ */
+void batman_run_test_once(void) {
+    batman_simple_test();
 }
 
