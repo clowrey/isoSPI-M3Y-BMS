@@ -2,16 +2,27 @@
 
 .program isosnoop
 .side_set 1
+
+    ; One-shot mode: trigger → capture 256 bytes → wait for next trigger
+    
 .wrap_target
-
-    ; Continuously sample at high speed - signals are normally HIGH with 75ns LOW pulses
-    ; Sample every 2 cycles (16ns at 125MHz) to catch 75ns pulses
-    in pins, 2 side 1      ; Sample (1 cycle + sideset)
-    in pins, 2 side 0      ; Sample (1 cycle)
-    in pins, 2 side 1      ; Sample
-    in pins, 2 side 0      ; Sample - 4 samples = 1 byte autopush
-
-.wrap
+wait_for_trigger:
+    wait 0 pin 0 side 1             ; Wait for GP9 LOW (frame start)
+    set y, 31 side 0                ; Y = byte counter (256 bytes = 32 blocks of 8)
+    
+capture_block:
+    ; Capture 8 bytes per iteration (compact loop)
+    set x, 7 side 1                 ; X = 8 bytes per block
+    
+capture_byte:
+    in pins, 2 side 0               ; 4 samples = 1 byte
+    in pins, 2 side 1
+    in pins, 2 side 0
+    in pins, 2 side 1
+    jmp x--, capture_byte side 0    ; Repeat for 8 bytes
+    
+    jmp y--, capture_block side 1   ; Repeat for 32 blocks (256 bytes total)
+.wrap                               ; After 256 bytes, wrap back to wait_for_trigger
 
 
 % c-sdk {

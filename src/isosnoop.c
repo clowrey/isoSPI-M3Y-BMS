@@ -43,45 +43,94 @@ static const char* isosnoop_identify_command(uint16_t cmd);
 /**
  * @brief Detect 260ns start pulse (frame synchronization)
  * 
+ * NOTE: This function is NO LONGER USED - the PIO now handles start pulse detection!
+ * The PIO waits for the 260ns start pulse before capturing data.
+ * 
  * The start pulse is 260ns wide, which is ~16 samples at our rate
  * Regular data pulses are 75ns (~4-5 samples)
  * 
+ * Key characteristics of a real start pulse:
+ * - Long run (10+ samples) of a VALID differential state (H0=0x01 or 1H=0x02)
+ * - NOT 0x00 (both LOW - error/invalid)
+ * - NOT 0x03 (both HIGH - idle)
+ * - Followed by changing samples (actual Manchester data)
+ * 
  * Returns: index of first sample after start pulse, or 0 if not found
  */
+#if 0  // UNUSED - PIO handles triggering now
 static uint16_t find_start_pulse(uint8_t *samples, uint16_t sample_count) {
     uint8_t last_sample = 0xFF;
     uint8_t run_length = 0;
+    uint16_t run_start_byte = 0;
+    uint16_t run_start_sample = 0;
     
-    for (uint16_t byte_idx = 0; byte_idx < sample_count; byte_idx++) {
+    for (uint16_t byte_idx = 0; byte_idx < sample_count - 2; byte_idx++) {  // -2 to check what follows
         uint8_t sample_byte = samples[byte_idx];
         
         for (int sample_idx = 0; sample_idx < 4; sample_idx++) {
             uint8_t sample = (sample_byte >> (6 - sample_idx*2)) & 0x03;
             
-            // Skip idle (both HIGH)
-            if (sample == 0x03) {
+            // Reset on idle or invalid samples
+            if (sample == 0x03 || sample == 0x00) {
                 run_length = 0;
+                last_sample = 0xFF;
                 continue;
             }
             
-            if (sample == last_sample) {
-                run_length++;
-                // 260ns ≈ 16 samples, look for run of 10+ (with margin)
-                if (run_length >= 10) {
-                    // Found start pulse! Return position after it
-                    uint16_t pos = byte_idx * 4 + sample_idx + 1;
-                    printf("[START PULSE DETECTED at sample %u]\n", pos);
-                    return pos / 4;  // Return byte index
+            // Only track valid differential states: H0 (0x01) or 1H (0x02)
+            if (sample == 0x01 || sample == 0x02) {
+                if (sample == last_sample) {
+                    run_length++;
+                    
+                    // 260ns ≈ 16 samples, look for run of 10+ (with margin)
+                    if (run_length >= 10) {
+                        // Found a long pulse! Check what follows
+                        uint16_t check_byte = byte_idx + 1;
+                        if (check_byte < sample_count - 1) {
+                            // Look at next few bytes for Manchester preamble pattern
+                            // isoSPI typically has alternating states (55 AA pattern) after start
+                            uint8_t next1 = samples[check_byte];
+                            uint8_t next2 = samples[check_byte + 1];
+                            
+                            // Count valid differential samples (not idle/invalid)
+                            int valid_count = 0;
+                            for (int i = 0; i < 4; i++) {
+                                uint8_t s = (next1 >> (6 - i*2)) & 0x03;
+                                if (s == 0x01 || s == 0x02) valid_count++;
+                            }
+                            for (int i = 0; i < 4; i++) {
+                                uint8_t s = (next2 >> (6 - i*2)) & 0x03;
+                                if (s == 0x01 || s == 0x02) valid_count++;
+                            }
+                            
+                            // If we have at least 4 valid samples following, it's likely real data
+                            if (valid_count >= 4) {
+                                uint16_t pos = byte_idx * 4 + sample_idx + 1;
+                                printf("[START PULSE: %s×%u at pos %u, %d valid samples follow]\n", 
+                                       sample == 0x01 ? "H0" : "1H", run_length, pos, valid_count);
+                                return pos / 4;  // Return byte index
+                            }
+                        }
+                        // Continue looking if not followed by enough data
+                    }
+                } else {
+                    // New run starting
+                    run_length = 1;
+                    last_sample = sample;
+                    run_start_byte = byte_idx;
+                    run_start_sample = sample_idx;
                 }
             } else {
-                run_length = 1;
-                last_sample = sample;
+                // Invalid sample
+                run_length = 0;
+                last_sample = 0xFF;
             }
         }
     }
     
     return 0;  // No start pulse found
 }
+#endif  // End of unused find_start_pulse function
 
 /**
  * @brief Decode Manchester-encoded samples to bytes
@@ -95,17 +144,15 @@ static uint16_t find_start_pulse(uint8_t *samples, uint16_t sample_count) {
 static void isosnoop_decode_manchester(uint8_t *samples, uint16_t sample_count) {
     decoded_count = 0;
     
-    // Look for 260ns start pulse
-    uint16_t start_byte = find_start_pulse(samples, sample_count);
-    if (start_byte == 0 && sample_count > 10) {
-        printf("[No start pulse found - decoding from beginning]\n");
-    }
+    // PIO has already triggered on the 260ns start pulse
+    // Data is synchronized to the beginning of the frame
+    printf("[PIO-triggered capture - data starts after 260ns pulse]\n");
     
     uint8_t current_byte = 0;
     uint8_t bit_count = 0;
     
     // Extract all 2-bit samples into a continuous stream
-    for (uint16_t byte_idx = start_byte; byte_idx < sample_count; byte_idx++) {
+    for (uint16_t byte_idx = 0; byte_idx < sample_count; byte_idx++) {
         uint8_t sample_byte = samples[byte_idx];
         
         // Each byte has 4 samples (2 bits each)
