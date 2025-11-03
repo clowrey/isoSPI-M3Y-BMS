@@ -293,7 +293,10 @@ The project includes a PIO-based isoSPI interface:
 
 - **Master Mode:** Transmit and receive differential Manchester-encoded data
 - **Snooper Mode:** Passive monitoring of existing isoSPI bus traffic
-- **PIO Implementation:** Uses PIO1 for high-speed bit-banging
+- **PIO Implementation:** 
+  - **PIO0:** CAN bus (can2040, all 4 state machines)
+  - **PIO1 SM1:** isoSPI snooper (passive monitoring)
+  - **PIO2 SM0:** isoSPI master (active communication)
 - **Switchable:** Can switch between Batman SPI and isoSPI PIO at runtime
 - **Debug Output:** Capture and decode bus traffic
 

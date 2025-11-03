@@ -19,8 +19,9 @@
 #define CMD_READ_E      0x4B
 #define CMD_READ_F      0x4C
 
+// Use PIO1 SM1 (PIO0=CAN, PIO1=snooper, PIO2=isoSPI master)
 #define ISOSNOOP_MASTER_PIO pio1
-#define ISOSNOOP_MASTER_SM 0
+#define ISOSNOOP_MASTER_SM 1
 
 #define PIO_IRQ_TO_USE 0
 #define DMA_IRQ_TO_USE 0
@@ -42,7 +43,8 @@ void isosnoop_setup(uint rx_pin_base, int invert, uint sampling_pin) {
     dma_chan = dma_channel_hw_addr(dma_channel_rx);
     last_write_addr = dma_chan->write_addr;
     
-    printf("[Snooper initialized - GP%d/GP%d, invert=%d]\n", rx_pin_base, rx_pin_base + 1, invert);
+    printf("isoSPI Snooper: Initialized on PIO1 SM1 (RX: GP%d-GP%d, invert=%d, sampling: GP%d)\n", 
+           rx_pin_base, rx_pin_base + 1, invert, sampling_pin);
 }
 
 void isosnoop_dma_setup(PIO pio, uint sm) {

@@ -58,11 +58,12 @@
 #define CAN_PIO_NUM             0        // Use PIO0
 #define CAN_BITRATE             500000   // 500 kbps
 
-// isoSPI PIO Interface (PIO1) - Consecutive pins GP7-11
+// isoSPI PIO Interface (PIO1=snooper, PIO2=master) - Consecutive pins GP7-11
 #define ISOSPI_TX_PIN_BASE          7    // GP7=enable, GP8=data (GP7+1)
 #define ISOSPI_RX_PIN_BASE          9    // GP9=high, GP10=low (GP9+1, shared)
 #define ISOSPI_SAMPLING_PIN         11   // GP11 - debug output
-#define ISOSPI_PIO_NUM              1    // Use PIO1
+#define ISOSPI_SNOOPER_PIO_NUM      1    // Use PIO1 for snooper
+#define ISOSPI_MASTER_PIO_NUM       2    // Use PIO2 for master
 
 // Status LED (built-in)
 #define LED_PIN                 25       // GP25 - Built-in LED

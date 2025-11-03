@@ -25,7 +25,7 @@ bool isospi_interface_init(void) {
     
     printf("Initializing isoSPI interface...\n");
     
-    // Initialize master (PIO1 SM0)
+    // Initialize master (PIO2 SM0)
     isospi_master_setup(ISOSPI_TX_PIN_BASE, ISOSPI_RX_PIN_BASE);
     
     // Initialize snooper (PIO1 SM1)
@@ -129,7 +129,7 @@ void isospi_interface_print_status(void) {
         printf("RX Pins: GP%d (high), GP%d (low)\n", 
                ISOSPI_RX_PIN_BASE, ISOSPI_RX_PIN_BASE + 1);
         printf("Sampling Pin: GP%d\n", ISOSPI_SAMPLING_PIN);
-        printf("PIO: PIO1 (SM0=master, SM1=snooper)\n");
+        printf("PIO: PIO0=CAN, PIO1=snooper(SM1), PIO2=master(SM0)\n");
     }
     printf("==============================\n\n");
 }
