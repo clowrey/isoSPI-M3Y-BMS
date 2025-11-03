@@ -5,7 +5,7 @@
 .wrap_target
 
     ; count down
-    set y, 20 side 0
+    set y, 30 side 0
 recv_wait:
     ; read the two input pins
     mov x, pins side 0
@@ -24,11 +24,12 @@ recv_wait2:
 
 recv_started:   
     ; wait a bit before sampling twice
-    nop [2] side 0
+    nop side 0
     ; first sample
-    in pins, 2 [14] side 1
+    in pins, 2 [15] side 1
     ; second sample
     in pins, 2 [15] side 0 
+    nop [15] side 0
 
 
 

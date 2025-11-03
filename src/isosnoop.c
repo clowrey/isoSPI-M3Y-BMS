@@ -63,6 +63,8 @@ void isosnoop_print_buffer() {
         for(int i=0;i<2;i++) {
             uint8_t chunk = b & 0xf0;
             b <<= 4;
+            //printf("%x ", chunk); 
+            //continue;
             
             switch(chunk>>4) {
             case 0xa:
