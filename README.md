@@ -1,28 +1,36 @@
-# Tesla Model 3 BMS Interface
+# Tesla Model 3 BMS Interface - RP2350A Port
 
-This project provides comprehensive interfaces for the Tesla Model 3 Battery Management System (BMS), offering both Arduino/PlatformIO firmware and a modern ESPHome touchscreen interface.
+This project provides a comprehensive interface for the Tesla Model 3 Battery Management System (BMS), featuring RP2350A microcontroller with advanced monitoring, CAN bus integration, and ESPHome touchscreen display.
 
 **Batman BMS code** originally created by Damien and Tom: https://github.com/damienmaguire/Tesla-M3-Bms-Software
 
 ## Project Overview
 
-This repository contains two main implementations:
+This is the RP2350A port of the Tesla Model 3 BMS Interface, replacing ESP32 with RP2350A MCU and AS8510 with INA228 for current sensing.
 
-1. **Arduino/PlatformIO Firmware** - Core BMS interface with dual serial API
+### Main Components
+
+1. **RP2350A Firmware** - Core BMS interface with advanced features
 2. **ESPHome Interface** - Modern touchscreen display with Home Assistant integration
 
 ## Features
 
-### Core BMS Interface (Arduino/PlatformIO)
+### Core BMS Interface (RP2350A)
 - **Parameter API**: Read/write all 108+ BMS parameters via serial commands
-- **Dual Serial Interface**: USB and hardware UART (pins 12/13) for flexible access
+- **Dual Serial Interface**: USB debug and UART for ESPHome display
 - **Real-time Monitoring**: Cell voltages, temperatures, balance status
-- **Balance Control**: Enable/disable cell balancing remotely
-- **AS8510 Support**: Integration with AS8510 analog front-end chips
+- **INA228 Current Sensing**: High-precision current and power monitoring
+- **CAN Bus**: 500kbps broadcast of pack status (via can2040)
+- **isoSPI Interface**: PIO-based master and passive snooper modes
+- **Coulomb Counter**: Accurate SOC tracking with INA228 integration
+- **ADC Pack Voltage**: 4-channel monitoring (Pack Neg/Pos, Link Neg/Pos)
+- **Contactor Control**: 4-channel PWM control for safe sequencing
+- **Unified BMB Testing**: Automatic interface switching between Batman and isoSPI
 
 ### ESPHome Display Interface
 - **Touchscreen Display**: 480x320 QSPI LCD with LVGL interface
 - **Real-time Visualization**: Live BMS data with modern UI
+- **Cell Voltage Graph**: Visual bar graph of all 108 cells with color-coded status
 - **Home Assistant Integration**: All parameters as HA entities
 - **Touch Controls**: Balance on/off buttons directly on display
 - **OTA Updates**: Over-the-air firmware updates
@@ -59,67 +67,108 @@ Balance Status: OFF
 
 ## Hardware Requirements
 
-### For Arduino/PlatformIO Implementation
-- **ESP32 Development Board** (e.g., ESP32-DevKitC)
-- **AS8510 Analog Front-End Chips** (for Tesla BMS interface)
-- **Tesla Model 3 BMS Hardware**
-- **Serial connections** for dual UART interface
+### For RP2350A Implementation
+- **MCU:** RP2350A (custom board)
+- **Current Sensor:** Texas Instruments INA228 (I2C, 25.296µΩ shunt)
+- **Pack Voltage Sensing:** Internal 12-bit ADC with voltage dividers (400V → 3.0V)
+- **BMS Interface:** Tesla Model 3 Battery Management Boards (SPI/isoSPI)
+- **CAN Transceiver:** MCP2551, TJA1050, or similar (for CAN bus)
+- **Display Interface:** UART connection to ESPHome display
 
 ### For ESPHome Display Interface
 - **ESP32-S3 Development Board** with PSRAM (16MB flash)
 - **JC4832W535 QSPI Display** (480x320 with touch)
-- **Tesla BMS Connection** via UART
+- **UART Connection** to RP2350A board (921600 baud)
 
 ## Project Structure
 
 ```
-tesla-m3-bms-mod-chip/
-├── src/                           # Arduino/PlatformIO source code
-│   ├── main.cpp                   # Main program entry point
-│   ├── BatMan.cpp                 # Battery Management implementation
-│   └── Param.cpp                  # Parameter management system
-├── include/                       # Header files
-│   ├── BatMan.h                   # BMS interface definitions
-│   └── Param.h                    # Parameter system definitions
+isoSPI-M3Y-BMS/
+├── CMakeLists.txt                 # Pico SDK build configuration
+├── pico_sdk_import.cmake          # Pico SDK import
+├── can2040/                       # CAN bus library
+│   └── src/
+│       ├── can2040.c              # can2040 implementation
+│       └── can2040.h              # can2040 header
+├── src/
+│   ├── include/                   # Header files
+│   │   ├── pin_config.h           # Pin assignments for RP2350A
+│   │   ├── batman.h               # BMS interface
+│   │   ├── param.h                # Parameter system
+│   │   ├── ina228.h               # INA228 driver
+│   │   ├── adc_monitor.h          # ADC voltage monitor
+│   │   ├── coulomb_counter.h      # Coulomb counting
+│   │   ├── can_interface.h        # CAN bus interface
+│   │   ├── isospi_interface.h     # isoSPI interface manager
+│   │   ├── isospi_master.h        # isoSPI master (PIO)
+│   │   ├── isosnoop.h             # isoSPI bus snooper
+│   │   └── bmb_test.h             # Unified BMB test interface
+│   ├── main.c                     # Main application loop
+│   ├── batman.c                   # BMS interface implementation
+│   ├── param.c                    # Parameter management
+│   ├── ina228.c                   # INA228 driver
+│   ├── adc_monitor.c              # ADC implementation
+│   ├── coulomb_counter.c          # Coulomb counter
+│   ├── can_interface.c            # CAN bus implementation
+│   ├── isospi_interface.c         # isoSPI interface manager
+│   ├── isospi_master.c            # isoSPI master implementation
+│   ├── isospi_master.pio          # PIO code for isoSPI TX/RX
+│   ├── isosnoop.c                 # isoSPI snooper implementation
+│   ├── isosnoop.pio               # PIO code for passive snooping
+│   └── bmb_test.c                 # Unified BMB test implementation
 ├── esphome-interface/             # ESPHome touchscreen interface
-│   ├── tesla_bms_display.yaml    # Main ESPHome configuration
-│   ├── cell_voltage_sensors.yaml        # Individual cell sensors
-│   ├── external_components/              # Custom components
-│   │   └── tesla_bms_uart/              # BMS UART parser component
-│   └── README.md                        # ESPHome setup guide
-├── AS8510-library/                # AS8510 chip support library
-├── context/                       # Logic analyzer captures and data
+│   ├── tesla_bms_display.yaml     # Main ESPHome configuration
+│   ├── cell_voltage_sensors.yaml  # Individual cell sensors
+│   ├── external_components/       # Custom components
+│   │   └── tesla_bms_uart/        # BMS UART parser component
+│   └── README.md                  # ESPHome setup guide
+├── context/                       # Original Arduino reference code
 ├── PARAMETER_API.md               # Complete parameter API documentation
-├── DUAL_SERIAL_API.md            # Dual serial interface guide
-└── platformio.ini                # PlatformIO configuration
+├── CAN_INTEGRATION_REPORT.md      # CAN bus integration details
+├── CAN_MESSAGE_FORMAT.md          # CAN message specifications
+└── README_RP2350.md               # Additional RP2350A documentation
 ```
 
 ## Getting Started
 
-### Arduino/PlatformIO Setup
+### RP2350A Setup
 
-1. **Install PlatformIO**:
+1. **Install Pico SDK**:
    ```bash
-   # Via VS Code extension or CLI
-   pip install platformio
+   git clone https://github.com/raspberrypi/pico-sdk.git
+   cd pico-sdk
+   git submodule update --init
+   export PICO_SDK_PATH=$(pwd)
    ```
 
-2. **Clone and build**:
+2. **Install toolchain**:
+   ```bash
+   # For Ubuntu/Debian:
+   sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+   
+   # For macOS:
+   brew install cmake
+   brew install --cask gcc-arm-embedded
+   ```
+
+3. **Clone and build**:
    ```bash
    git clone <repository-url>
-   cd tesla-m3-bms-mod-chip
-   pio run
+   cd isoSPI-M3Y-BMS
+   mkdir build
+   cd build
+   cmake ..
+   make
    ```
 
-3. **Upload to ESP32**:
-   ```bash
-   pio run -t upload
-   ```
+4. **Flash to RP2350A**:
+   - Hold BOOTSEL button while connecting USB
+   - Copy `tesla_bms_rp2350.uf2` to the mounted drive
+   - Device will reboot automatically
 
-4. **Monitor output**:
-   ```bash
-   pio device monitor
-   ```
+5. **Monitor output**:
+   - Connect via USB serial (115200 baud)
+   - Use any serial terminal (screen, minicom, PuTTY)
 
 ### ESPHome Display Setup
 
@@ -139,29 +188,58 @@ See `esphome-interface/README.md` for detailed setup instructions.
 
 ## API Usage
 
-### Parameter API Commands
+### Serial Commands
+
+Connect via USB serial (115200 baud) and use these commands:
 
 ```bash
-# List all parameters
-param list
+# System Status
+help                       # Show available commands
+status                     # Show system status
+params                     # List all parameters
 
-# Get specific parameter
-param get u1              # Cell 1 voltage
-param get balance         # Balance status
-param get CellsPresent    # Number of cells
+# Parameter API
+param get u1               # Get Cell 1 voltage
+param get balance          # Get balance status
+param get CellsPresent     # Get number of cells
+param set balance 1        # Enable balancing
+param set balance 0        # Disable balancing
 
-# Set parameter (where applicable)
-param set balance 1       # Enable balancing
-param set balance 0       # Disable balancing
+# Component Status
+ina228                     # Show INA228 current sensor status
+adc                        # Show ADC pack voltages
+coulomb                    # Show coulomb counter status
+batman                     # Show BATMan BMS interface status
+can                        # Show CAN bus statistics
 
-# Help
-param help
+# Contactor Control
+contactors on/off          # Enable/disable all contactors (sequenced)
+link_neg on/off            # Enable/disable Link Negative contactor
+link_pos on/off            # Enable/disable Link Positive contactor
+fc_pos on/off              # Enable/disable FC Positive (precharge) contactor
+fc_neg on/off              # Enable/disable FC Negative contactor
+
+# isoSPI Interface
+isospi init                # Initialize isoSPI interface
+isospi enable              # Switch to isoSPI master (disable Batman)
+batman enable              # Switch to Batman (disable isoSPI)
+isospi test                # Run isoSPI test pattern
+isospi snoop               # Print captured bus traffic
+isospi status              # Show isoSPI interface status
+
+# BMB Testing
+bmb test                   # Run BMB test once (uses active interface)
+bmb continuous on          # Enable continuous BMB testing (every 2 seconds)
+bmb continuous off         # Disable continuous BMB testing
+
+# Balance Control
+balance on/off             # Enable/disable cell balancing
 ```
 
 ### Dual Serial Interface
 
-- **USB Serial**: Full system logs and API access
-- **Hardware Serial** (pins 12/13): Clean API access without logs
+- **USB Serial**: Full system logs, debug output, and complete API access
+- **UART Serial** (GP0/GP1): ESPHome display communication (921600 baud)
 
 ### Available Parameters
 
@@ -180,10 +258,65 @@ param help
 
 See `PARAMETER_API.md` for complete parameter documentation.
 
+## Pin Configuration
+
+See `src/include/pin_config.h` for complete pin assignments:
+
+- **Tesla BMS SPI:** GP16 (MISO), GP19 (MOSI), GP18 (SCK), GP17 (CS), GP22 (Enable)
+- **INA228 I2C:** GP4 (SDA), GP5 (SCL), GP6 (Alert)
+- **Pack Voltage ADC:** GP26-29 (4 channels: Pack Neg, Pack Pos, Link Neg, Link Pos)
+- **ESPHome UART:** GP0 (TX), GP1 (RX)
+- **Contactor PWM:** GP20 (Link Pos), GP21 (Link Neg), GP23 (FC Pos), GP24 (FC Neg)
+- **CAN Bus:** GP2 (RX), GP3 (TX)
+- **isoSPI PIO:** GP7-11 (TX/RX differential pairs + sampling)
+
+## New Features
+
+### CAN Bus Interface
+
+The system includes CAN bus support via the `can2040` library:
+
+- **Bitrate:** 500 kbps
+- **PIO-based:** Uses PIO0 for CAN protocol implementation
+- **Message IDs:** Configurable standard or extended IDs
+- **Broadcasting:** Automatic 10Hz broadcast of pack status
+- **Statistics:** Track RX/TX message counts and errors
+
+CAN messages broadcast pack voltage, current, power, SOC, and cell voltages.
+
+See `CAN_INTEGRATION_REPORT.md` and `CAN_MESSAGE_FORMAT.md` for details.
+
+### isoSPI Interface
+
+The project includes a PIO-based isoSPI interface:
+
+- **Master Mode:** Transmit and receive differential Manchester-encoded data
+- **Snooper Mode:** Passive monitoring of existing isoSPI bus traffic
+- **PIO Implementation:** Uses PIO1 for high-speed bit-banging
+- **Switchable:** Can switch between Batman SPI and isoSPI PIO at runtime
+- **Debug Output:** Capture and decode bus traffic
+
+**isoSPI Workflow:**
+1. `isospi init` - Initialize the PIO state machines
+2. `isospi enable` - Switch to isoSPI master (disables Batman)
+3. `bmb test` - Run test to communicate with BMBs
+4. `isospi snoop` - Display captured bus traffic
+5. `batman enable` - Switch back to Batman SPI (disables isoSPI)
+
+### Unified BMB Testing
+
+The system includes a unified BMB test routine that automatically works with whichever interface (Batman or isoSPI) is currently active:
+
+- **Single Test:** `bmb test` - Run one test cycle immediately
+- **Continuous Mode:** `bmb continuous on` - Run tests every 2 seconds automatically
+- **Stop Continuous:** `bmb continuous off` - Stop automatic testing
+
+The test routine automatically detects which interface is active and uses the appropriate protocol.
+
 ## Integration Options
 
 ### 1. Direct Serial Connection
-Connect via USB or hardware UART for direct parameter access.
+Connect via USB serial for direct parameter access and system control.
 
 ### 2. ESPHome + Home Assistant
 Full home automation integration with:
@@ -191,44 +324,137 @@ Full home automation integration with:
 - Alerting and automation
 - Historical data logging
 - Remote control capabilities
+- Touch screen display interface
 
-### 3. Custom Applications
+### 3. CAN Bus Integration
+Broadcast BMS data on CAN bus for integration with:
+- Vehicle ECUs
+- Chargers
+- Inverters
+- Data loggers
+
+### 4. Custom Applications
 Use the parameter API to build custom monitoring solutions.
 
 ## Documentation
 
 - **[Parameter API Guide](PARAMETER_API.md)** - Complete API reference
-- **[Dual Serial Interface](DUAL_SERIAL_API.md)** - Serial configuration guide
+- **[CAN Integration Report](CAN_INTEGRATION_REPORT.md)** - CAN bus implementation details
+- **[CAN Message Format](CAN_MESSAGE_FORMAT.md)** - CAN message specifications
 - **[ESPHome Setup](esphome-interface/README.md)** - Display interface guide
+- **[RP2350A Details](README_RP2350.md)** - Additional RP2350A-specific documentation
 
 ## Development
 
 ### Building
 ```bash
-# Arduino/PlatformIO
-pio run
+# RP2350A Firmware
+mkdir build
+cd build
+cmake ..
+make
 
-# ESPHome
+# ESPHome Display
 cd esphome-interface
 esphome compile tesla_bms_display.yaml
 ```
 
 ### Testing
-- Use logic analyzer captures in `context/` directory for debugging
-- Monitor both serial interfaces for comprehensive system analysis
+- Use logic analyzer captures in `scope-capture/` directory for debugging
+- Monitor USB serial for comprehensive system analysis
+- Test individual components using serial commands
+- Use `bmb continuous on` for extended testing
 - Test with actual Tesla BMS hardware for validation
+
+### Troubleshooting
+
+#### INA228 Not Detected
+- Check I2C connections (GP4=SDA, GP5=SCL)
+- Verify pull-up resistors (2.2kΩ recommended)
+- Run `ina228` command for diagnostics
+
+#### ADC Reading Issues
+- Verify voltage dividers (400V → 3.0V)
+- Check TVS diodes for protection
+- Run `adc` command to check readings
+
+#### BMS Communication Failed
+- Verify SPI connections (GP16-19)
+- Check SPI clock speed (1MHz)
+- Run `batman` command for status
+- Try switching to isoSPI: `isospi init` then `isospi enable`
+
+#### CAN Bus Issues
+- Check CAN transceiver wiring (GP2=RX, GP3=TX)
+- Verify bitrate matches other devices (500kbps)
+- Run `can` command to check statistics
+- Ensure proper termination resistors (120Ω)
+
+#### isoSPI Issues
+- Check pin connections (GP7-11)
+- Run `isospi status` to check initialization
+- Use `isospi snoop` to monitor bus traffic
+- Try `isospi test` to verify master functionality
+
+## Implementation Status
+
+### ✅ Completed (Phases 1-2)
+- [x] Pico SDK project structure and CMake configuration
+- [x] Pin configuration and hardware interfaces
+- [x] INA228 I2C driver (complete with alerts)
+- [x] Internal ADC driver for pack voltages (4 channels)
+- [x] Coulomb counter implementation
+- [x] Parameter management system
+- [x] USB serial interface (debug and API)
+- [x] UART interface for ESPHome (921600 baud)
+- [x] PWM contactor control (4 channels, sequenced)
+- [x] Serial command processing (30+ commands)
+- [x] CAN bus interface (can2040, 500kbps)
+- [x] isoSPI PIO master implementation
+- [x] isoSPI passive bus snooper
+- [x] Unified BMB test interface
+- [x] Runtime interface switching (Batman/isoSPI)
+
+### 🚧 In Progress (Phase 3)
+- [x] BATMan/isoSPI interface switching
+- [x] Runtime interface control (automatic disable/enable)
+- [ ] Full BMS state machine
+- [ ] Cell voltage reading via isoSPI
+- [ ] Cell balancing control
+- [ ] Temperature monitoring
+
+### 📋 Pending (Phases 4-6)
+- [ ] Hardware testing and validation
+- [ ] Calibration routines for ADC
+- [ ] Flash storage for calibration data
+- [ ] Error handling and recovery
+- [ ] Extended testing (24+ hours)
+- [ ] Performance optimization
+- [ ] Documentation completion
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Test with actual hardware where possible
+4. Test thoroughly with hardware
 5. Submit a pull request
 
 ## Hardware Safety
 
-⚠️ **Warning**: This project interfaces with high-voltage battery systems. Proper safety precautions and electrical knowledge are required. Always follow proper ESD procedures and battery safety protocols.
+⚠️ **HIGH VOLTAGE WARNING**
+- This system interfaces with 400V battery packs
+- Proper isolation and safety measures required
+- Use appropriate personal protection equipment
+- Follow all electrical safety protocols
+- EV battery systems can deliver lethal current
+
+⚠️ **DEVELOPMENT STATUS**
+- This is a development version (v2.0.0)
+- isoSPI implementation is experimental
+- BATMan protocol partially implemented
+- Extensive testing required before production use
+- **Use at your own risk**
 
 ## License
 
@@ -239,6 +465,44 @@ This program is free software: you can redistribute it and/or modify it under th
 This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 ## Changelog
+
+### Version 2.0.0 (November 2025) - RP2350A Port
+**Complete hardware platform migration to RP2350A:**
+
+#### **Hardware Changes**
+- **Microcontroller:** Migrated from ESP32 to RP2350A
+- **Current Sensing:** Replaced AS8510 with Texas Instruments INA228
+- **Pack Voltage:** Added internal 12-bit ADC monitoring (4 channels)
+- **CAN Bus:** Integrated hardware CAN transceiver support
+
+#### **New Core Features**
+- **CAN Bus Interface:** 500kbps broadcast via can2040 library (PIO-based)
+  - Automatic 10Hz pack status broadcasting
+  - Configurable message IDs and data formatting
+  - Statistics tracking for TX/RX/errors
+- **isoSPI PIO Implementation:**
+  - Master mode for direct BMB communication
+  - Passive snooper mode for bus monitoring
+  - Runtime switching between Batman SPI and isoSPI
+  - Differential Manchester encoding/decoding
+- **Unified BMB Testing:** Single test interface for both Batman and isoSPI modes
+- **INA228 Driver:** High-precision current, voltage, and power monitoring
+- **Coulomb Counter:** Accurate SOC tracking with INA228 integration
+- **ADC Monitor:** 4-channel pack voltage monitoring with voltage dividers
+- **Contactor Control:** 4-channel PWM control with sequenced operation
+
+#### **Enhanced Capabilities**
+- **Serial Command System:** Comprehensive CLI with 30+ commands
+- **Interface Switching:** Runtime enable/disable of Batman/isoSPI modes
+- **Continuous Testing:** Automated BMB testing every 2 seconds
+- **Hardware Monitoring:** Real-time status for all peripherals
+- **Parameter System:** Enhanced with additional monitoring parameters
+
+#### **Development Infrastructure**
+- **Build System:** Migrated to Pico SDK with CMake
+- **PIO Programming:** Custom PIO code for CAN and isoSPI
+- **C Implementation:** Pure C codebase (replaced C++ Arduino)
+- **Documentation:** Added CAN_INTEGRATION_REPORT.md and CAN_MESSAGE_FORMAT.md
 
 ### Version 1.3.1 (January 2025)
 **New Feature: Exact Balance Cell Tracking**
@@ -309,7 +573,17 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 - **Balance Control**: Remote cell balancing enable/disable
 - **Real-time Monitoring**: Cell voltages, temperatures, system status
 
+## References
+
+- [RP2350 Datasheet](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf)
+- [Pico SDK Documentation](https://www.raspberrypi.com/documentation/pico-sdk/)
+- [INA228 Datasheet](https://www.ti.com/product/INA228)
+- [can2040 Library](https://github.com/KevinOConnor/can2040)
+- [Original BATMan BMS](https://github.com/damienmaguire/Tesla-M3-Bms-Software)
+
 ## Acknowledgments
 
 - **Damien Maguire & Tom de Bree** - Original BATMan BMS software
 - **ESPHome Community** - Framework and component support
+- **Kevin O'Connor** - can2040 library for RP2040/RP2350
+- **Raspberry Pi Foundation** - Pico SDK and excellent documentation
