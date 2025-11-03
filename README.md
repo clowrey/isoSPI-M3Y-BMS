@@ -2,8 +2,8 @@
 
 This project provides a comprehensive interface for the Tesla Model 3 Battery Management System (BMS), featuring RP2350A microcontroller with advanced monitoring, CAN bus integration, and ESPHome touchscreen display.
 
-**Batman BMS code** originally created by Damien and Tom: https://github.com/damienmaguire/Tesla-M3-Bms-Software
-**Pico PIO Code for isoSPI** plus all the isoSPI logic created by jonny5532
+- **Batman BMS code** originally created by Damien and Tom: https://github.com/damienmaguire/Tesla-M3-Bms-Software
+- **Pico PIO Code for isoSPI** plus all the isoSPI logic created by jonny5532
 
 ## Project Overview
 
