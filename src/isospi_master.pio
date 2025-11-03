@@ -149,7 +149,7 @@ void isospi_master_program_init(PIO pio, uint sm, uint offset, uint tx_pin_base,
     // Shift to right, autopush with threshold 32
     sm_config_set_in_shift(&c, false, true, 32);
     sm_config_set_in_pin_base(&c, rx_pin_base);
-    sm_config_set_in_pin_count(&c, rx_pin_base);
+    sm_config_set_in_pin_count(&c, 2);  // CL: FIXED - should be pin count (2), not pin base
 
     //sm_config_set_clkdiv_int_frac8(&c, 2, 0);
 

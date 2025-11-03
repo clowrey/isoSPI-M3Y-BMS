@@ -23,15 +23,23 @@ void isospi_master_setup(uint tx_pin_base, uint rx_pin_base) {
     // rx_pin_base      is the high rx data pin
     // rx_pin_base + 1  is the low rx data pin
 
+    printf("isoSPI Master: Loading PIO program...\n");
     uint offset = pio_add_program(ISOSPI_MASTER_PIO, &isospi_master_program);
+    printf("isoSPI Master: PIO program loaded at offset %d\n", offset);
+    
     isospi_master_program_init(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM, offset, tx_pin_base, rx_pin_base);
+    printf("isoSPI Master: PIO state machine configured\n");
+    
     pio_sm_set_enabled(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM, true);
+    printf("isoSPI Master: State machine enabled\n");
     
     printf("isoSPI Master: Initialized on PIO2 SM0 (TX: GP%d-GP%d, RX: GP%d-GP%d)\n", 
            tx_pin_base, tx_pin_base + 1, rx_pin_base, rx_pin_base + 1);
 }
 
 bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
+    printf("[isoSPI TX] Starting transmission of %d bytes\n", (int)len);
+    
     const uint8_t cs_front_porch = 150; // wait after asserting CS
     pio_sm_put_blocking(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM, cs_front_porch << 24);
 
