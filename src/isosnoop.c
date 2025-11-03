@@ -5,6 +5,19 @@
 #include "hardware/pio.h"
 
 #include <stdio.h>
+#include <stdbool.h>
+
+// BATMan Protocol Commands
+#define CMD_WAKEUP      0x2AD4
+#define CMD_MUTE        0x20DD
+#define CMD_IDLE_WAKE   0x21F2
+#define CMD_SNAPSHOT    0x2BFB
+#define CMD_READ_A      0x47
+#define CMD_READ_B      0x48
+#define CMD_READ_C      0x49
+#define CMD_READ_D      0x4A
+#define CMD_READ_E      0x4B
+#define CMD_READ_F      0x4C
 
 #define ISOSNOOP_MASTER_PIO pio1
 #define ISOSNOOP_MASTER_SM 0
@@ -57,14 +70,15 @@ void isosnoop_dma_setup(PIO pio, uint sm) {
 
 void isosnoop_print_buffer() {
     uint32_t write_addr = dma_chan->write_addr;
-    while(last_write_addr != write_addr) {
-        uint8_t b = *((uint8_t *)last_write_addr);
-        last_write_addr = (last_write_addr + 1) & ~0x100; // wrap within buffer
+    uint32_t temp_addr = last_write_addr;
+    
+    // First pass: print symbols
+    while(temp_addr != write_addr) {
+        uint8_t b = *((uint8_t *)temp_addr);
+        temp_addr = (temp_addr + 1) & ~0x100; // wrap within buffer
         for(int i=0;i<2;i++) {
             uint8_t chunk = b & 0xf0;
             b <<= 4;
-            //printf("%x ", chunk); 
-            //continue;
             
             switch(chunk>>4) {
             case 0xa:
@@ -89,4 +103,247 @@ void isosnoop_print_buffer() {
         }
     }
     printf("\n");
+    
+    // Second pass: decode hex
+    temp_addr = last_write_addr;
+    printf("isoSPI HEX: ");
+    uint8_t bit_accumulator = 0;
+    int bit_count = 0;
+    bool in_frame = false;
+    
+    while(temp_addr != write_addr) {
+        uint8_t b = *((uint8_t *)temp_addr);
+        temp_addr = (temp_addr + 1) & ~0x100;
+        for(int i=0;i<2;i++) {
+            uint8_t chunk = b & 0xf0;
+            b <<= 4;
+            
+            uint8_t symbol = chunk >> 4;
+            
+            // CS marker detection (either 0xa or 0x5)
+            if(symbol == 0xa || symbol == 0x5) {
+                if(bit_count > 0) {
+                    // Flush any partial nibble
+                    if(bit_count < 4) {
+                        bit_accumulator <<= (4 - bit_count);
+                    }
+                    printf("%X", bit_accumulator);
+                    bit_count = 0;
+                    bit_accumulator = 0;
+                }
+                if(in_frame) {
+                    printf(" | ");
+                }
+                in_frame = true;
+                continue;
+            }
+            
+            // Only process data bits when in a frame
+            if(in_frame) {
+                if(symbol == 0x9) { // '1'
+                    bit_accumulator = (bit_accumulator << 1) | 1;
+                    bit_count++;
+                } else if(symbol == 0x6) { // '0'
+                    bit_accumulator = (bit_accumulator << 1) | 0;
+                    bit_count++;
+                }
+                
+                // When we have 4 bits, print the hex nibble
+                if(bit_count == 4) {
+                    printf("%X", bit_accumulator);
+                    bit_accumulator = 0;
+                    bit_count = 0;
+                }
+            }
+        }
+    }
+    
+    // Flush any remaining bits
+    if(bit_count > 0) {
+        bit_accumulator <<= (4 - bit_count);
+        printf("%X", bit_accumulator);
+    }
+    printf("\n");
+    
+    // Third pass: decode Batman protocol with MOSI/MISO separation
+    temp_addr = last_write_addr;
+    printf("BATMan: ");
+    
+    uint8_t mosi_buffer[128];  // Master out (even bits)
+    uint8_t miso_buffer[128];  // Slave in (odd bits)
+    int mosi_idx = 0;
+    int miso_idx = 0;
+    uint8_t mosi_accumulator = 0;
+    uint8_t miso_accumulator = 0;
+    int mosi_bit_count = 0;
+    int miso_bit_count = 0;
+    in_frame = false;
+    int frame_count = 0;
+    bool is_mosi = true;  // Alternate between MOSI and MISO
+    
+    // Collect separated MOSI and MISO bytes
+    while(temp_addr != write_addr && mosi_idx < 128 && miso_idx < 128) {
+        uint8_t b = *((uint8_t *)temp_addr);
+        temp_addr = (temp_addr + 1) & ~0x100;
+        for(int i=0;i<2;i++) {
+            uint8_t chunk = b & 0xf0;
+            b <<= 4;
+            uint8_t symbol = chunk >> 4;
+            
+            if(symbol == 0xa || symbol == 0x5) {
+                // Flush any partial bytes
+                if(mosi_bit_count > 0) {
+                    if(mosi_bit_count < 8) {
+                        mosi_accumulator <<= (8 - mosi_bit_count);
+                    }
+                    mosi_buffer[mosi_idx++] = mosi_accumulator;
+                    mosi_bit_count = 0;
+                    mosi_accumulator = 0;
+                }
+                if(miso_bit_count > 0) {
+                    if(miso_bit_count < 8) {
+                        miso_accumulator <<= (8 - miso_bit_count);
+                    }
+                    miso_buffer[miso_idx++] = miso_accumulator;
+                    miso_bit_count = 0;
+                    miso_accumulator = 0;
+                }
+                in_frame = true;
+                frame_count++;
+                is_mosi = true;  // First real data bit (after _ idle) is MOSI
+                continue;
+            }
+            
+            if(in_frame) {
+                // Pattern: _ 0 _ 0 _ 1 _ 0 ...
+                // Where _ = MISO (idle), next bit = MOSI, next _ = MISO (idle), next bit = MOSI
+                // After the last underscore, bits alternate: MOSI, MISO, MOSI, MISO
+                
+                if(symbol == 0x0) {
+                    // Underscore - this position is MISO idle
+                    // Next symbol will be MOSI
+                    is_mosi = true;
+                    continue;  // Skip the underscore, don't add to buffers
+                }
+                
+                uint8_t bit_val = 0;
+                if(symbol == 0x9) {
+                    bit_val = 1;
+                } else if(symbol == 0x6) {
+                    bit_val = 0;
+                } else {
+                    // Unknown symbol, skip
+                    continue;
+                }
+                
+                // Add bit to the appropriate buffer
+                if(is_mosi) {
+                    mosi_accumulator = (mosi_accumulator << 1) | bit_val;
+                    mosi_bit_count++;
+                    if(mosi_bit_count == 8) {
+                        mosi_buffer[mosi_idx++] = mosi_accumulator;
+                        mosi_accumulator = 0;
+                        mosi_bit_count = 0;
+                    }
+                } else {
+                    miso_accumulator = (miso_accumulator << 1) | bit_val;
+                    miso_bit_count++;
+                    if(miso_bit_count == 8) {
+                        miso_buffer[miso_idx++] = miso_accumulator;
+                        miso_accumulator = 0;
+                        miso_bit_count = 0;
+                    }
+                }
+                
+                // Toggle for next bit
+                is_mosi = !is_mosi;
+            }
+        }
+    }
+    
+    // Show separated MOSI and MISO hex data
+    printf("\nMOSI[%d]: ", mosi_idx);
+    for(int i = 0; i < mosi_idx && i < 30; i++) {
+        printf("%02X ", mosi_buffer[i]);
+    }
+    printf("\nMISO[%d]: ", miso_idx);
+    for(int i = 0; i < miso_idx && i < 30; i++) {
+        printf("%02X ", miso_buffer[i]);
+    }
+    printf("\n");
+    
+    // Now decode the commands from MOSI
+    int pos = 0;
+    while(pos < mosi_idx) {
+        if(pos + 1 < mosi_idx) {
+            uint16_t cmd = (mosi_buffer[pos] << 8) | mosi_buffer[pos + 1];
+            
+            // Check for 16-bit commands
+            if(cmd == CMD_WAKEUP) {
+                printf("[WAKEUP] ");
+                pos += 2;
+            } else if(cmd == CMD_IDLE_WAKE) {
+                printf("[UNMUTE] ");
+                pos += 2;
+            } else if((cmd & 0xFFF0) == (CMD_SNAPSHOT & 0xFFF0)) {
+                printf("[SNAPSHOT] ");
+                pos += 2;
+            } else if(mosi_buffer[pos] == CMD_READ_A && mosi_buffer[pos + 1] == 0x00) {
+                // Read command: 0x47 0x00
+                printf("[READ_A cells 0-2] ");
+                pos += 2; // Skip cmd bytes (0x47 0x00)
+                
+                // Skip CRC (0x70 0x01 or similar)
+                if(pos + 1 < mosi_idx) {
+                    pos += 2;
+                }
+                
+                // Skip padding bytes sent while waiting for response
+                if(pos + 1 < mosi_idx) {
+                    pos += 2;
+                }
+                
+                // Decode cell voltages from MISO buffer (starts at byte 2)
+                printf("BMB0: ");
+                for(int cell = 0; cell < 3; cell++) {
+                    int idx = 2 + (cell * 2);  // Data starts at offset 2
+                    if(idx + 1 < miso_idx) {
+                        // Batman format: [LOW][HIGH]
+                        uint16_t raw = (miso_buffer[idx + 1] << 8) | miso_buffer[idx];
+                        if(raw > 1000 && raw != 0xFFFF && raw != 0x7FFF) {
+                            // Match batman.c: convert to integer mV first, then to float V
+                            uint16_t voltage_mv = raw / 12.5;
+                            float voltage = voltage_mv / 1000.0f;
+                            printf("C%d=0x%04X(%.3fV) ", cell, raw, voltage);
+                        }
+                    }
+                }
+            } else if(mosi_buffer[pos] == CMD_READ_B && mosi_buffer[pos + 1] == 0x00) {
+                printf("[READ_B cells 3-5] ");
+                pos += 4; // Skip cmd + CRC
+                if(pos + 1 < miso_idx) {
+                    pos += 2; // Skip padding
+                }
+                if(pos + 5 < mosi_idx) {
+                    printf("BMB0: ");
+                    for(int cell = 0; cell < 3 && pos + 1 < mosi_idx; cell++) {
+                        uint16_t raw = (mosi_buffer[pos] << 8) | mosi_buffer[pos + 1];
+                        if(raw != 0xFFFF && raw != 0x0000 && raw != 0x7F7F && raw > 0x1000) {
+                            float voltage = raw / 12.5f / 1000.0f;
+                            printf("C%d=%.3fV ", cell + 3, voltage);
+                        }
+                        pos += 2;
+                    }
+                }
+            } else {
+                // Unknown, just skip
+                pos++;
+            }
+        } else {
+            pos++;
+        }
+    }
+    printf("\n");
+    
+    last_write_addr = write_addr;
 }
