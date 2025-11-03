@@ -2,36 +2,57 @@
 
 .program isosnoop
 .side_set 1
-
-    ; One-shot mode: trigger → capture 256 bytes → wait for next trigger
-    
 .wrap_target
-wait_for_trigger:
-    wait 0 pin 0 side 1             ; Wait for GP9 LOW (frame start)
-    set y, 31 side 0                ; Y = byte counter (256 bytes = 32 blocks of 8)
-    
-capture_block:
-    ; Capture 8 bytes per iteration (compact loop)
-    set x, 7 side 1                 ; X = 8 bytes per block
-    
-capture_byte:
-    in pins, 2 side 0               ; 4 samples = 1 byte
-    in pins, 2 side 1
-    in pins, 2 side 0
-    in pins, 2 side 1
-    jmp x--, capture_byte side 0    ; Repeat for 8 bytes
-    
-    jmp y--, capture_block side 1   ; Repeat for 32 blocks (256 bytes total)
-.wrap                               ; After 256 bytes, wrap back to wait_for_trigger
+
+    ; count down
+    set y, 20 side 0
+recv_wait:
+    ; read the two input pins
+    mov x, pins side 0
+    ; if nonzero, we got something
+    jmp x-- recv_started side 0
+    ; keep waiting
+    jmp y-- recv_wait side 0
+
+    in null, 4 side 0 ; record the gap
+
+recv_wait2:
+    ; read the two input pins
+    mov x, pins side 0
+    ; if zero, keep waiting
+    jmp !x recv_wait2 side 0
+
+recv_started:   
+    ; wait a bit before sampling twice
+    nop [2] side 0
+    ; first sample
+    in pins, 2 [14] side 1
+    ; second sample
+    in pins, 2 [15] side 0 
+
+
+
+.wrap
 
 
 % c-sdk {
 // this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
 
-void isosnoop_pio_setup(PIO pio, uint sm, uint offset, uint rx_pin_base, uint sampling_pin) {
-    // Enable pull-ups to match the normally-HIGH signals seen on scope
-    gpio_set_pulls(rx_pin_base, true, false);   // Pull-up enabled, pull-down disabled
-    gpio_set_pulls(rx_pin_base + 1, true, false);
+void isosnoop_pio_setup(PIO pio, uint sm, uint offset, uint rx_pin_base, int invert, uint sampling_pin) {
+    // Initialize GPIOs as inputs
+    gpio_init(rx_pin_base);
+    gpio_set_dir(rx_pin_base, GPIO_IN);
+    gpio_pull_up(rx_pin_base);  // Pull-up for normally-HIGH signals
+    
+    gpio_init(rx_pin_base + 1);
+    gpio_set_dir(rx_pin_base + 1, GPIO_IN);
+    gpio_pull_up(rx_pin_base + 1);
+    
+    // INVERT both RX pins in hardware if requested
+    if (invert) {
+        gpio_set_inover(rx_pin_base, GPIO_OVERRIDE_INVERT);
+        gpio_set_inover(rx_pin_base + 1, GPIO_OVERRIDE_INVERT);
+    }
     
     pio_sm_config c = isosnoop_program_get_default_config(offset);
 

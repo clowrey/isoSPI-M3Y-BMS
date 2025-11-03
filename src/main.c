@@ -230,8 +230,9 @@ void system_init(void) {
     batman_init();
     
     // Initialize isoSPI snooper (passive monitoring of BATMan traffic)
+    // Set invert=0 for normally-HIGH signals, invert=1 if signals appear inverted
     printf("Initializing isoSPI snooper...\n");
-    isosnoop_setup(ISOSPI_RX_PIN_BASE, ISOSPI_SAMPLING_PIN);
+    isosnoop_setup(ISOSPI_RX_PIN_BASE, 0, ISOSPI_SAMPLING_PIN);  // 0 = no inversion
     printf("isoSPI snooper initialized - monitoring BATMan traffic\n");
     
     // Initialize ADC for pack voltage monitoring
@@ -676,20 +677,14 @@ void process_command(const char* cmd) {
     }
     else if (strcmp(lower_cmd, "snoop diag") == 0) {
         printf("\n=== isoSPI Snooper Diagnostics ===\n");
-        uint32_t buffer_addr, dma_addr;
-        bool pio_running;
-        isosnoop_get_stats(&buffer_addr, &dma_addr, &pio_running);
+        printf("Monitoring GP%d and GP%d\n", ISOSPI_RX_PIN_BASE, ISOSPI_RX_PIN_BASE + 1);
         
-        printf("PIO Status: %s\n", pio_running ? "RUNNING" : "STOPPED");
-        printf("Buffer Address: 0x%08lx\n", buffer_addr);
-        printf("DMA Write Address: 0x%08lx\n", dma_addr);
-        printf("Bytes Written: %ld\n", dma_addr - buffer_addr);
-        
-        printf("\nPin States (GP9=high, GP10=low):\n");
+        printf("\nPin States (sample 20 times):\n");
         for (int i = 0; i < 20; i++) {
-            uint8_t pins = isosnoop_read_pins();
-            printf("  Sample %2d: GP9=%d GP10=%d (0b%d%d)\n", 
-                   i, (pins >> 1) & 1, pins & 1, (pins >> 1) & 1, pins & 1);
+            bool pin0 = gpio_get(ISOSPI_RX_PIN_BASE);
+            bool pin1 = gpio_get(ISOSPI_RX_PIN_BASE + 1);
+            printf("  Sample %2d: GP%d=%d GP%d=%d (0b%d%d)\n", 
+                   i, ISOSPI_RX_PIN_BASE, pin0, ISOSPI_RX_PIN_BASE + 1, pin1, pin0, pin1);
             sleep_ms(10);
         }
         printf("================================\n\n");

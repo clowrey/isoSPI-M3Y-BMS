@@ -14,19 +14,21 @@
 #define DMA_IRQ_PRIORITY PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY
 #define PIO_IRQ_PRIORITY PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY
 static uint dma_channel_rx;
+dma_channel_hw_t *dma_chan;
 
 char read_buffer[256] __attribute__((aligned(2048)));
+uint32_t last_write_addr;
 
 void isosnoop_dma_setup(PIO pio, uint sm);
 
-void isosnoop_setup(uint rx_pin_base, uint sampling_pin) {
+void isosnoop_setup(uint rx_pin_base, int invert, uint sampling_pin) {
     uint offset = pio_add_program(ISOSNOOP_MASTER_PIO, &isosnoop_program);
-    isosnoop_pio_setup(ISOSNOOP_MASTER_PIO, ISOSNOOP_MASTER_SM, offset, rx_pin_base, sampling_pin);
+    isosnoop_pio_setup(ISOSNOOP_MASTER_PIO, ISOSNOOP_MASTER_SM, offset, rx_pin_base, invert, sampling_pin);
     isosnoop_dma_setup(ISOSNOOP_MASTER_PIO, ISOSNOOP_MASTER_SM);
 
-    dma_channel_hw_t *dma_chan = dma_channel_hw_addr(dma_channel_rx);
-    uint32_t last_write_addr = dma_chan->write_addr;
-    uint32_t buf_end = (uint32_t)(read_buffer + sizeof(read_buffer));
+    dma_chan = dma_channel_hw_addr(dma_channel_rx);
+    last_write_addr = dma_chan->write_addr;
+    //uint32_t buf_end = (uint32_t)(read_buffer + sizeof(read_buffer));
 }
 
 void isosnoop_dma_setup(PIO pio, uint sm) {
@@ -57,10 +59,6 @@ void isosnoop_dma_setup(PIO pio, uint sm) {
 }
 
 void isosnoop_print_buffer() {
-    dma_channel_hw_t *dma_chan = dma_channel_hw_addr(dma_channel_rx);
-    static uint32_t last_write_addr = dma_chan->write_addr;
-    uint32_t buf_end = (uint32_t)(read_buffer + sizeof(read_buffer));
-
     uint32_t write_addr = dma_chan->write_addr;
     while(last_write_addr != write_addr) {
         uint8_t b = *((uint8_t *)last_write_addr);
@@ -68,19 +66,42 @@ void isosnoop_print_buffer() {
         for(int i=0;i<2;i++) {
             uint8_t chunk = b & 0xf0;
             b <<= 4;
-            if(chunk==0xa0) {
+            
+            switch(chunk>>4) {
+            case 0xa:
                 printf("CS1 ");
-            } else if(chunk==0x50) {
+                break;
+            case 0x5:
                 printf("CS0 ");
-            } else if(chunk==0x90) {
+                break;
+            case 0x9:
                 printf("1 ");
-            } else if(chunk==0x60) {
+                break;
+            case 0x6:
                 printf("0 ");
-            } else if(chunk==0x00) {
+                break;
+            case 0x0:
                 printf("_ ");
-            } else {
+                break;
+            default:
                 printf("? ");
-            }
+                break;
+            }    
+
+
+            // if(chunk==0xa0) {
+            //     printf("CS1 ");
+            // } else if(chunk==0x50) {
+            //     printf("CS0 ");
+            // } else if(chunk==0x90) {
+            //     printf("1 ");
+            // } else if(chunk==0x60) {
+            //     printf("0 ");
+            // } else if(chunk==0x00) {
+            //     printf("_ ");
+            // } else {
+            //     printf("? ");
+            // }
         }
     }
     printf("\n");

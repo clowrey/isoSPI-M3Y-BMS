@@ -29,7 +29,7 @@ bool isospi_interface_init(void) {
     isospi_master_setup(ISOSPI_TX_PIN_BASE, ISOSPI_RX_PIN_BASE);
     
     // Initialize snooper (PIO1 SM1)
-    isosnoop_setup(ISOSPI_RX_PIN_BASE, ISOSPI_SAMPLING_PIN);
+    isosnoop_setup(ISOSPI_RX_PIN_BASE, 0, ISOSPI_SAMPLING_PIN);  // 0 = no inversion
     
     isospi_initialized = true;
     printf("isoSPI interface initialized successfully\n");

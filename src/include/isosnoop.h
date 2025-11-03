@@ -1,51 +1,28 @@
 /**
  * @file isosnoop.h
- * @brief isoSPI Bus Snooper using PIO
- * 
- * Passive monitoring of isoSPI bus traffic using DMA ring buffer
+ * @brief isoSPI Bus Snooper with GPIO inversion support
  */
 
 #ifndef ISOSNOOP_H
 #define ISOSNOOP_H
 
 #include <stdint.h>
-#include "pico/types.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /**
- * @brief Initialize isoSPI snooper interface
- * @param rx_pin_base Base pin for RX (high on base, low on base+1)
- * @param sampling_pin Pin for sampling debug output
- */
-void isosnoop_setup(uint rx_pin_base, uint sampling_pin);
-
-/**
- * @brief Print captured bus traffic buffer
+ * @brief Initialize the isoSPI snooper
  * 
- * Decodes and prints captured isoSPI traffic to console
+ * @param rx_pin_base Base GPIO pin for differential input (e.g., GP9)
+ * @param invert Set to 1 to invert GPIO inputs in hardware, 0 for no inversion
+ * @param sampling_pin GPIO pin for diagnostic output (shows sampling points on scope)
  */
-void isosnoop_print_buffer(void);
+void isosnoop_setup(unsigned int rx_pin_base, int invert, unsigned int sampling_pin);
 
 /**
- * @brief Get snooper statistics for diagnostics
- * @param buffer_addr Pointer to store buffer address
- * @param dma_addr Pointer to store current DMA write address
- * @param pio_running Pointer to store PIO running status
+ * @brief Print captured isoSPI data from ring buffer
+ * 
+ * Call this periodically (e.g., in main loop) to display any new captured data.
+ * Output format: "CS1", "CS0", "1", "0", "_" for each Manchester symbol
  */
-void isosnoop_get_stats(uint32_t *buffer_addr, uint32_t *dma_addr, bool *pio_running);
-
-/**
- * @brief Read raw pin states for diagnostics
- * @return Current state of GP9 and GP10 as 2-bit value
- */
-uint8_t isosnoop_read_pins(void);
-
-#ifdef __cplusplus
-}
-#endif
+void isosnoop_print_buffer();
 
 #endif // ISOSNOOP_H
-

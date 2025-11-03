@@ -378,6 +378,8 @@ static void batman_simple_test(void) {
     // PHASE 1: Send all commands with precise timing (no printing)
     // ============================================================
     
+    // Snooper now runs continuously - no triggering needed
+    
     // Step 1: Wake up the IC
     batman_send_command(CMD_WAKEUP);
     sleep_us(120); // CL - 100us too short - 120us works

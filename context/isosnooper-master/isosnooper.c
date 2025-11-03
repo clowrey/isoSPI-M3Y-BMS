@@ -21,7 +21,7 @@ int main() {
     //while (!stdio_usb_connected()) {}
     
     isospi_master_setup(LED_PIN+1, 2);
-    isosnoop_setup(LED_PIN+1, 8);
+    isosnoop_setup(LED_PIN+1, true, 8);
     
     // printf("waiting...\n");
     // sleep_ms(5000);
