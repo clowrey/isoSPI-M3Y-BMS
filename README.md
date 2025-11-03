@@ -3,6 +3,7 @@
 This project provides a comprehensive interface for the Tesla Model 3 Battery Management System (BMS), featuring RP2350A microcontroller with advanced monitoring, CAN bus integration, and ESPHome touchscreen display.
 
 **Batman BMS code** originally created by Damien and Tom: https://github.com/damienmaguire/Tesla-M3-Bms-Software
+**Pico PIO Code for isoSPI** plus all the isoSPI logic created by jonny5532
 
 ## Project Overview
 
@@ -566,10 +567,9 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 - **WiFi Connectivity**: Remote monitoring capabilities
 
 ### Version 1.0.0 - Core BMS Interface
-**Initial release with Arduino/PlatformIO implementation:**
+**Initial release with Arduino/ESP32 implementation:**
 - **Parameter API**: 108+ BMS parameters via serial commands
-- **Dual Serial Interface**: USB + hardware UART (pins 12/13)
-- **AS8510 Integration**: Analog front-end chip support
+- **Dual Serial Interface**: USB + hardware UART
 - **Balance Control**: Remote cell balancing enable/disable
 - **Real-time Monitoring**: Cell voltages, temperatures, system status
 
