@@ -232,6 +232,7 @@ static void batman_get_data(uint8_t reg_cmd) {
     
     // Read only 10 bytes (for 1 BMB + margin) instead of 72 bytes (for 8 BMBs)
     // This makes the transaction shorter and easier to capture with the snooper
+
     for (int count = 0; count <= 10; count += 2) {
         // Send 16-bit padding (0x0000)
         tx_buf[0] = 0x00;
@@ -463,6 +464,8 @@ static void isospi_master_test(void) {
     tx[1] = CMD_SNAPSHOT & 0xFF;
     valid = isospi_write_read_blocking(tx, rx, 2);
     
+    char read_buf[20] = {0};
+    /*
     // Command 4: READ_A with CRC
     uint8_t cmd_bytes[2] = {CMD_READ_A, 0x00};
     uint8_t crc = batman_calc_crc(cmd_bytes, 2);
@@ -477,17 +480,48 @@ static void isospi_master_test(void) {
     tx[1] = 0x00;
     valid = isospi_write_read_blocking(tx, rx, 2);
     
-    // Read response (simplified - same as Batman)
-    char read_buf[20] = {0};
-    for (int i = 0; i < 10; i += 2) {
+    // Read response (same as Batman - read 12 bytes)
+    
+    
+    for (int i = 0; i <= 10; i += 2) {  // CL: <= to match Batman (6 iterations = 12 bytes)
         tx[0] = 0x00;
         tx[1] = 0x00;
         valid = isospi_write_read_blocking(tx, rx, 2);
-        read_buf[i] = rx[0];
-        read_buf[i + 1] = rx[1];
+        if (i < 20) {  // Don't overflow buffer
+            read_buf[i] = rx[0];
+            read_buf[i + 1] = rx[1];
+        }
+    }
+    */
+    
+    // Parse and display voltages (same logic as Batman)
+    printf("\n=== isoSPI READ COMPLETE ===\n");
+    
+    int valid_cells = 0;
+    int bmb = 0;
+    
+    printf("BMB0: ");
+    for (int cell = 0; cell <= 2; cell++) {  // Cells 0-2
+        int idx = (bmb * 9) + (cell * 2);
+        if (idx + 1 < 20) {
+            uint16_t tempvol = read_buf[idx + 1] * 256 + read_buf[idx];
+            
+            if (tempvol != 0xFFFF && tempvol != 0x0000) {
+                uint16_t voltage_mv = tempvol / 12.5;
+                printf("C%d=%.3fV ", cell, voltage_mv / 1000.0f);
+                valid_cells++;
+            } else {
+                printf("C%d=INV ", cell);
+            }
+        }
     }
     
-    printf("\nisoSPI Master Test Complete\n");
+    if (valid_cells > 0) {
+        printf("✓\n");
+    } else {
+        printf("✗\n");
+    }
+    
     printf("======================================\n\n");
 }
 
@@ -502,9 +536,9 @@ static void batman_state_machine(void) {
             idle_count = 0;
             break;
             
-        case 1:  // Wait 5 seconds after Batman test
+        case 1:  // Wait 2 seconds after Batman test
             idle_count++;
-            if (idle_count >= 50) {  // 5 seconds at 100ms loop
+            if (idle_count >= 20) {  // 2 seconds at 100ms loop
                 loop_state = 2;
                 idle_count = 0;
             }
@@ -516,9 +550,9 @@ static void batman_state_machine(void) {
             idle_count = 0;
             break;
             
-        case 3:  // Wait 5 seconds after isoSPI test
+        case 3:  // Wait 2 seconds after isoSPI test
             idle_count++;
-            if (idle_count >= 50) {  // 5 seconds at 100ms loop
+            if (idle_count >= 20) {  // 2 seconds at 100ms loop
                 loop_state = 0;  // Loop back to Batman test
                 idle_count = 0;
             }
@@ -549,7 +583,7 @@ void batman_loop(void) {
         
         if (!initialized) {
             printf("\n*** Alternating Test Mode ***\n");
-            printf("*** Batman SPI → 5s → isoSPI Master → 5s → repeat ***\n");
+            printf("*** Batman SPI → 2s → isoSPI Master → 2s → repeat ***\n");
             printf("*** Both interfaces tested automatically ***\n\n");
             initialized = true;
         }

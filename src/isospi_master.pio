@@ -37,16 +37,16 @@ do_bit:
     jmp !x zero_bit
 
     ; output a 1
-    set pins, tx_high [15]
-    set pins, tx_low  [15]
+    set pins, tx_high [10] //CL was 15 now 11 after adding in clock divider for logner CS
+    set pins, tx_low  [10]
     jmp done
 
     ; cheeky void space
 
 zero_bit:
     ; output a 0
-    set pins, tx_low  [15]
-    set pins, tx_high [15]
+    set pins, tx_low  [10]
+    set pins, tx_high [10]
 
 done:
     ; go idle and wait for the lines to settle
@@ -60,8 +60,8 @@ done:
 
 
     ; simulate a delay before the reply
-    nop [30]
-    nop [18]
+    ; nop [30]
+    ; nop [18]
 
     ; count down waiting for a reply
     set y, 30
@@ -151,7 +151,7 @@ void isospi_master_program_init(PIO pio, uint sm, uint offset, uint tx_pin_base,
     sm_config_set_in_pin_base(&c, rx_pin_base);
     sm_config_set_in_pin_count(&c, 2);  // CL: FIXED - should be pin count (2), not pin base
 
-    //sm_config_set_clkdiv_int_frac8(&c, 2, 0);
+    sm_config_set_clkdiv_int_frac8(&c, 1, 100); // CL: slow it down, needed longer CS pulse
 
     //sm_config_set_set_pins(&c, rts_pin, 1);
 

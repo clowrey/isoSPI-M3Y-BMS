@@ -10,6 +10,7 @@
 #include "isospi_master.pio.h"
 #include "hardware/pio.h"
 #include "hardware/gpio.h"
+#include "pico/stdlib.h"  // CL: For sleep_us()
 #include <stdio.h>
 
 // Use PIO2 SM0 (PIO0=CAN, PIO1=isosnoop, PIO2=isoSPI master)
@@ -42,6 +43,7 @@ bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
     
     const uint8_t cs_front_porch = 150; // wait after asserting CS
     pio_sm_put_blocking(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM, cs_front_porch << 24);
+    sleep_us(6); //CL delay after CS was too short. 
 
     bool valid = true;
     for(size_t i = 0; i < len; i++) {
