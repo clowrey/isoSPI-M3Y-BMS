@@ -82,7 +82,8 @@ int main() {
     printf("========================================\n");
     printf("  Tesla Model 3 BMS Interface\n");
     printf("  RP2350A + INA228 + Internal ADC\n");
-    printf("  Mode: BATMan + isoSPI Snooper\n");
+    printf("  Mode: BATMan + isoSPI Master + Snooper\n");
+    printf("  All interfaces active simultaneously\n");
     printf("========================================\n");
     printf("\n");
     
@@ -229,12 +230,10 @@ void system_init(void) {
     // CL: Initialize BATMan - it will generate isoSPI traffic
     batman_init();
     
-    // Initialize isoSPI snooper (passive monitoring of BATMan traffic)
-    // Set invert=0 for normally-Low signals, invert=1 if signals appear inverted
-    // CL we want our signals inverted since they are normally high active low
-    printf("Initializing isoSPI snooper...\n");
-    isosnoop_setup(ISOSPI_RX_PIN_BASE, 1, ISOSPI_SAMPLING_PIN);  // 1 = inversion
-    printf("isoSPI snooper initialized - monitoring BATMan traffic\n");
+    // CL: Initialize isoSPI master and snooper (both active at same time)
+    printf("Initializing isoSPI interface...\n");
+    isospi_interface_init();
+    printf("isoSPI master and snooper initialized - both active alongside BATMan\n");
     
     // Initialize ADC for pack voltage monitoring
     adc_monitor_init();

@@ -74,6 +74,11 @@ void isosnoop_print_buffer() {
     uint32_t write_addr = dma_chan->write_addr;
     uint32_t temp_addr = last_write_addr;
     
+    // CL: Don't print if there's no new data
+    if (temp_addr == write_addr) {
+        return;
+    }
+    
     // First pass: print symbols
     while(temp_addr != write_addr) {
         uint8_t b = *((uint8_t *)temp_addr);

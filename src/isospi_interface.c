@@ -2,8 +2,8 @@
  * @file isospi_interface.c
  * @brief High-level isoSPI Interface Management
  * 
- * Manages switching between Batman SPI and isoSPI PIO interfaces.
- * Ensures mutual exclusion between interfaces.
+ * CL: Both Batman SPI and isoSPI PIO interfaces run simultaneously.
+ * The snooper monitors all traffic on the bus from both sources.
  */
 
 #include "isospi_interface.h"
@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static interface_type_t active_interface = INTERFACE_BATMAN;
+static interface_type_t active_interface = INTERFACE_ISOSPI; // CL: Both run together
 static bool isospi_initialized = false;
 
 bool isospi_interface_init(void) {
@@ -29,7 +29,8 @@ bool isospi_interface_init(void) {
     isospi_master_setup(ISOSPI_TX_PIN_BASE, ISOSPI_RX_PIN_BASE);
     
     // Initialize snooper (PIO1 SM1)
-    isosnoop_setup(ISOSPI_RX_PIN_BASE, 0, ISOSPI_SAMPLING_PIN);  // 0 = no inversion
+    // CL: Use invert=1 since signals are normally high, active low
+    isosnoop_setup(ISOSPI_RX_PIN_BASE, 1, ISOSPI_SAMPLING_PIN);  // 1 = inversion
     
     isospi_initialized = true;
     printf("isoSPI interface initialized successfully\n");
@@ -43,16 +44,9 @@ void isospi_interface_enable(void) {
         return;
     }
     
-    if (active_interface == INTERFACE_ISOSPI) {
-        printf("isoSPI interface already active\n");
-        return;
-    }
-    
-    printf("Switching to isoSPI interface (disabling Batman)\n");
+    // CL: Both interfaces run simultaneously - no need to disable Batman
     active_interface = INTERFACE_ISOSPI;
-    
-    // CL: Disable Batman loop so it doesn't print while isoSPI is active
-    batman_set_enabled(false);
+    printf("isoSPI interface active (Batman continues running)\n");
 }
 
 void isospi_interface_disable(void) {
@@ -61,11 +55,9 @@ void isospi_interface_disable(void) {
         return;
     }
     
-    printf("Switching to Batman interface (disabling isoSPI)\n");
+    // CL: Both interfaces run simultaneously - this just changes the active_interface flag
     active_interface = INTERFACE_BATMAN;
-    
-    // CL: Re-enable Batman loop
-    batman_set_enabled(true);
+    printf("Active interface set to Batman (isoSPI master continues running)\n");
 }
 
 interface_type_t isospi_interface_get_active(void) {
@@ -78,11 +70,7 @@ void isospi_interface_test(void) {
         return;
     }
     
-    if (active_interface != INTERFACE_ISOSPI) {
-        printf("Error: isoSPI interface not active. Use 'isospi enable' first.\n");
-        return;
-    }
-    
+    // CL: No need to check active_interface - both run simultaneously
     printf("\n=== isoSPI Test Pattern ===\n");
     
     // Test pattern from original isosnooper
@@ -120,8 +108,9 @@ void isospi_interface_print_snoop(void) {
 void isospi_interface_print_status(void) {
     printf("\n=== isoSPI Interface Status ===\n");
     printf("Initialized: %s\n", isospi_initialized ? "YES" : "NO");
-    printf("Active Interface: %s\n", 
+    printf("Active Test Interface: %s\n", 
            active_interface == INTERFACE_ISOSPI ? "isoSPI" : "Batman");
+    printf("Note: Both Batman and isoSPI master run simultaneously\n");
     
     if (isospi_initialized) {
         printf("TX Pins: GP%d (enable), GP%d (data)\n", 

@@ -10,6 +10,7 @@
 #include "batman.h"
 #include "param.h"
 #include "pin_config.h"
+#include "isospi_master.h"  // CL: For alternating isoSPI master tests
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
@@ -436,21 +437,90 @@ static void batman_simple_test(void) {
 }
 
 /**
- * @brief State machine based on original BatMan.cpp
+ * @brief Run isoSPI master test (same commands as Batman but via PIO)
+ */
+static void isospi_master_test(void) {
+    printf("\n=== Running isoSPI Master Test (PIO2) ===\n");
+    
+    // Same command sequence as batman_simple_test()
+    bool valid;
+    char tx[2], rx[2];
+    
+    // Command 1: WAKEUP
+    tx[0] = (CMD_WAKEUP >> 8) & 0xFF;
+    tx[1] = CMD_WAKEUP & 0xFF;
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    sleep_us(120);  // CL: 120us delay after wakeup
+    
+    // Command 2: IDLE_WAKE
+    tx[0] = (CMD_IDLE_WAKE >> 8) & 0xFF;
+    tx[1] = CMD_IDLE_WAKE & 0xFF;
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    sleep_us(70);  // CL: 70us delay after idle_wake
+    
+    // Command 3: SNAPSHOT
+    tx[0] = (CMD_SNAPSHOT >> 8) & 0xFF;
+    tx[1] = CMD_SNAPSHOT & 0xFF;
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    
+    // Command 4: READ_A with CRC
+    uint8_t cmd_bytes[2] = {CMD_READ_A, 0x00};
+    uint8_t crc = batman_calc_crc(cmd_bytes, 2);
+    
+    // Send command word
+    tx[0] = CMD_READ_A;
+    tx[1] = 0x00;
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    
+    // Send CRC word
+    tx[0] = crc;
+    tx[1] = 0x00;
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    
+    // Read response (simplified - same as Batman)
+    char read_buf[20] = {0};
+    for (int i = 0; i < 10; i += 2) {
+        tx[0] = 0x00;
+        tx[1] = 0x00;
+        valid = isospi_write_read_blocking(tx, rx, 2);
+        read_buf[i] = rx[0];
+        read_buf[i + 1] = rx[1];
+    }
+    
+    printf("\nisoSPI Master Test Complete\n");
+    printf("======================================\n\n");
+}
+
+/**
+ * @brief State machine - alternates between Batman and isoSPI master tests
  */
 static void batman_state_machine(void) {
     switch (loop_state) {
-        case 0:  // Run simple test once
+        case 0:  // Run Batman test
             batman_simple_test();
             loop_state++;
+            idle_count = 0;
             break;
             
-        case 1:  // Wait 2 seconds then repeat
+        case 1:  // Wait 5 seconds after Batman test
             idle_count++;
-            if (idle_count > 20) {  // ~2 seconds at 100ms loop
-                loop_state = 0;
+            if (idle_count >= 50) {  // 5 seconds at 100ms loop
+                loop_state = 2;
                 idle_count = 0;
-                // Test will repeat in 2 seconds
+            }
+            break;
+            
+        case 2:  // Run isoSPI master test
+            isospi_master_test();
+            loop_state++;
+            idle_count = 0;
+            break;
+            
+        case 3:  // Wait 5 seconds after isoSPI test
+            idle_count++;
+            if (idle_count >= 50) {  // 5 seconds at 100ms loop
+                loop_state = 0;  // Loop back to Batman test
+                idle_count = 0;
             }
             break;
             
@@ -478,9 +548,9 @@ void batman_loop(void) {
         last_update = now;
         
         if (!initialized) {
-            printf("\n*** BATMan MINIMAL Test Mode ***\n");
-            printf("*** Original sequence restored ***\n");
-            printf("*** Test repeats every 2 seconds ***\n\n");
+            printf("\n*** Alternating Test Mode ***\n");
+            printf("*** Batman SPI → 5s → isoSPI Master → 5s → repeat ***\n");
+            printf("*** Both interfaces tested automatically ***\n\n");
             initialized = true;
         }
         
