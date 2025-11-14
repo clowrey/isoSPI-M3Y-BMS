@@ -187,6 +187,7 @@ void isosnoop_print_buffer() {
     in_frame = false;
     int frame_count = 0;
     bool is_mosi = true;  // Alternate between MOSI and MISO
+    int bit_debug_count = 0;  // CL: Debug counter
     
     // Collect separated MOSI and MISO bytes
     while(temp_addr != write_addr && mosi_idx < 128 && miso_idx < 128) {
@@ -244,6 +245,7 @@ void isosnoop_print_buffer() {
                 }
                 
                 // Add bit to the appropriate buffer
+                // Note: Accumulate bits MSB-first (bit 7 arrives first)
                 if(is_mosi) {
                     mosi_accumulator = (mosi_accumulator << 1) | bit_val;
                     mosi_bit_count++;
@@ -310,12 +312,13 @@ void isosnoop_print_buffer() {
                     pos += 2;
                 }
                 
-                // Decode cell voltages from MISO buffer (starts at byte 2)
+                // Decode cell voltages from MISO buffer
+                // Cell data starts at MISO[1] - Cell0 is at bytes [1-2]
                 printf("BMB0: ");
                 for(int cell = 0; cell < 3; cell++) {
-                    int idx = 2 + (cell * 2);  // Data starts at offset 2
+                    int idx = 1 + (cell * 2);  // Cell data starts at MISO[1] (ODD offset!)
                     if(idx + 1 < miso_idx) {
-                        // Batman format: [LOW][HIGH]
+                        // Use LOW,HIGH byte order to match batman.c
                         uint16_t raw = (miso_buffer[idx + 1] << 8) | miso_buffer[idx];
                         if(raw > 1000 && raw != 0xFFFF && raw != 0x7FFF) {
                             // Match batman.c: convert to integer mV first, then to float V

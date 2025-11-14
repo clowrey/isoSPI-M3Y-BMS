@@ -24,10 +24,10 @@ recv_wait2:
 
 recv_started:   
     ; first sample
-    in pins, 2 [15] side 1
-    nop [2] side 1
+    in pins, 2 [15] side 1  //CL - controls how long after a transition the first sample is taken
+    nop [2] side 1          //CL - controls delay between samples
     ; second sample
-    in pins, 2 [15] side 0
+    in pins, 2 [15] side 0   //CL - controls when the next bit starts
 
 wait_for_idle:
     mov x, pins side 0

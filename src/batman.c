@@ -539,18 +539,20 @@ static void batman_state_machine(void) {
         case 1:  // Wait 2 seconds after Batman test
             idle_count++;
             if (idle_count >= 20) {  // 2 seconds at 100ms loop
-                loop_state = 2;
+                loop_state = 0;  // CL: Skip isoSPI master test, go back to Batman
                 idle_count = 0;
             }
             break;
             
-        case 2:  // Run isoSPI master test
-            isospi_master_test();
+        case 2:  // Run isoSPI master test - DISABLED
+            // CL: isoSPI master test disabled per user request
+            // isospi_master_test();
             loop_state++;
             idle_count = 0;
             break;
             
-        case 3:  // Wait 2 seconds after isoSPI test
+        case 3:  // Wait 2 seconds after isoSPI test - DISABLED
+            // CL: Skip this state since isoSPI master test is disabled
             idle_count++;
             if (idle_count >= 20) {  // 2 seconds at 100ms loop
                 loop_state = 0;  // Loop back to Batman test
