@@ -70,7 +70,7 @@ void bmb_test_run_once(void) {
     } else {
         printf("\n=== Running BMB Test (isoSPI PIO) ===\n");
         
-        // CL: Same command sequence as batman_simple_test()
+        // CL: Same command sequence as isospi_simple_test()
         // Command sequence for LTC6811 (Tesla BMB chip):
         // 1. WAKEUP (0x2AD4)
         // 2. IDLE_WAKE (0x21F2)

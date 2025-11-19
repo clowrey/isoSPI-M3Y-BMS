@@ -497,6 +497,10 @@ void process_command(const char* cmd) {
         printf("  isospi init         - Initialize isoSPI interface\n");
         printf("  isospi enable       - Switch to isoSPI master (disable Batman)\n");
         printf("  batman enable       - Switch to Batman (disable isoSPI)\n");
+        printf("  batman stop         - Stop automatic Batman polling\n");
+        printf("  batman start        - Start automatic Batman polling\n");
+        printf("  test stop           - Stop ALL automatic testing (batman + bmb)\n");
+        printf("  test start          - Start automatic testing\n");
         printf("  isospi test         - Run isoSPI test pattern\n");
         printf("  isospi snoop        - Print captured bus traffic\n");
         printf("  isospi status       - Show isoSPI interface status\n");
@@ -665,6 +669,23 @@ void process_command(const char* cmd) {
     }
     else if (strcmp(lower_cmd, "batman enable") == 0) {
         isospi_interface_disable();
+    }
+    else if (strcmp(lower_cmd, "batman stop") == 0) {
+        batman_set_enabled(false);
+        printf("Batman automatic polling STOPPED\n");
+    }
+    else if (strcmp(lower_cmd, "batman start") == 0) {
+        batman_set_enabled(true);
+        printf("Batman automatic polling STARTED\n");
+    }
+    else if (strcmp(lower_cmd, "test stop") == 0) {
+        batman_set_enabled(false);
+        bmb_test_set_continuous(false);
+        printf("ALL automatic testing STOPPED (Batman + BMB)\n");
+    }
+    else if (strcmp(lower_cmd, "test start") == 0) {
+        batman_set_enabled(true);
+        printf("Automatic testing STARTED (Batman enabled)\n");
     }
     else if (strcmp(lower_cmd, "isospi test") == 0) {
         isospi_interface_test();

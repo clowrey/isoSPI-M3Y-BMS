@@ -11,6 +11,7 @@
 #include "isosnoop.h"
 #include "batman.h"
 #include "pin_config.h"
+#include "pico/stdlib.h"  // For sleep_us()
 #include <stdio.h>
 #include <string.h>
 
@@ -70,29 +71,70 @@ void isospi_interface_test(void) {
         return;
     }
     
+    // Disable Batman temporarily to avoid bus conflicts
+    printf("Disabling Batman for test...\n");
+    batman_set_enabled(false);
+    sleep_ms(100);  // Wait for any in-progress transactions
+    
+    // Flush snooper buffer
+    printf("Flushing snooper buffer...\n");
+    isosnoop_print_buffer();  // Clear old data
+    
     // CL: No need to check active_interface - both run simultaneously
-    printf("\n=== isoSPI Test Pattern ===\n");
+    printf("\n=== isoSPI Master Test - Batman Commands ===\n");
+    printf("Note: isoSPI Master TX on GP%d (enable), GP%d (data)\n", ISOSPI_TX_PIN_BASE, ISOSPI_TX_PIN_BASE + 1);
+    printf("      isoSPI Master RX on GP%d (high), GP%d (low)\n", ISOSPI_RX_PIN_BASE, ISOSPI_RX_PIN_BASE + 1);
+    printf("      Batman SPI on GP%d (MOSI), GP%d (MISO)\n", TESLA_BMS_PIN_MOSI, TESLA_BMS_PIN_MISO);
+    printf("WARNING: If these are on different physical buses, test will not work!\n\n");
     
-    // Test pattern from original isosnooper
-    char tx[] = {0b10101010, 0b11111111, 0b00000000, 0b11001100, 0b00110011};
-    char rx[sizeof(tx)] = {0};
+    char tx[2], rx[2];
+    bool valid;
     
-    printf("TX: ");
-    for (size_t i = 0; i < sizeof(tx); i++) {
-        printf("0x%02X ", (uint8_t)tx[i]);
-    }
-    printf("\n");
+    // Command 1: WAKEUP (0x2AD4) with inverted CS: CS1 CS0
+    printf("\n1. WAKEUP (0x2AD4) - with inverted CS (CS1 CS0):\n");
+    isospi_invert_first_chip_select(true);
+    tx[0] = 0x2A; tx[1] = 0xD4;
+    printf("   TX: 0x%02X 0x%02X\n", (uint8_t)tx[0], (uint8_t)tx[1]);
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    printf("   RX: 0x%02X 0x%02X [%s]\n", (uint8_t)rx[0], (uint8_t)rx[1], valid ? "VALID" : "INVALID");
+    isospi_invert_first_chip_select(false);  // Restore normal CS
+    sleep_us(150);  // CL: tREADY min 150us for Batman IC
     
-    bool valid = isospi_write_read_blocking(tx, rx, sizeof(tx));
+    // Command 2: UNMUTE/IDLE_WAKE (0x21F2) with normal CS
+    printf("\n2. UNMUTE (0x21F2) - with normal CS (CS0 CS1):\n");
+    tx[0] = 0x21; tx[1] = 0xF2;
+    printf("   TX: 0x%02X 0x%02X\n", (uint8_t)tx[0], (uint8_t)tx[1]);
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    printf("   RX: 0x%02X 0x%02X [%s]\n", (uint8_t)rx[0], (uint8_t)rx[1], valid ? "VALID" : "INVALID");
+    sleep_us(150);  // CL: tREADY min 150us for Batman IC
     
-    printf("RX: ");
-    for (size_t i = 0; i < sizeof(rx); i++) {
-        printf("0x%02X ", (uint8_t)rx[i]);
-    }
-    printf("\n");
+    // Command 3: SNAPSHOT (0x2BFB) with normal CS
+    printf("\n3. SNAPSHOT (0x2BFB) - with normal CS (CS0 CS1):\n");
+    tx[0] = 0x2B; tx[1] = 0xFB;
+    printf("   TX: 0x%02X 0x%02X\n", (uint8_t)tx[0], (uint8_t)tx[1]);
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    printf("   RX: 0x%02X 0x%02X [%s]\n", (uint8_t)rx[0], (uint8_t)rx[1], valid ? "VALID" : "INVALID");
+    sleep_us(150);  // CL: tREADY min 150us for Batman IC
     
-    printf("Valid: %s\n", valid ? "YES" : "NO");
+    // Command 4: READ_A (0x47) with normal CS
+    printf("\n4. READ_A (0x47) - with normal CS (CS0 CS1):\n");
+    tx[0] = 0x47; tx[1] = 0x00;
+    printf("   TX: 0x%02X 0x%02X\n", (uint8_t)tx[0], (uint8_t)tx[1]);
+    valid = isospi_write_read_blocking(tx, rx, 2);
+    printf("   RX: 0x%02X 0x%02X [%s]\n", (uint8_t)rx[0], (uint8_t)rx[1], valid ? "VALID" : "INVALID");
+    
+    printf("\n=== Test Complete ===\n");
+    printf("Check snooper output with 'isospi snoop' command\n");
+    printf("Expected CS patterns:\n");
+    printf("  WAKEUP:   CS1 CS0 (inverted)\n");
+    printf("  UNMUTE:   CS0 CS1 (normal)\n");
+    printf("  SNAPSHOT: CS0 CS1 (normal)\n");
+    printf("  READ_A:   CS0 CS1 (normal)\n");
     printf("=========================\n\n");
+    
+    // Re-enable Batman
+    printf("Re-enabling Batman...\n");
+    batman_set_enabled(true);
 }
 
 void isospi_interface_print_snoop(void) {

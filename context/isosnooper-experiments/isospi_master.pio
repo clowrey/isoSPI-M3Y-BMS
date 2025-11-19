@@ -1,34 +1,28 @@
 .pio_version 0 // only requires PIO version 0
 
-; Patterns when testing (DISABLED - for direct differential drive)
-;.define TX_HIGH 0b01
-;.define TX_LOW  0b10
+; Patterns when testing
+;.define TX_HIGH 0b10
+;.define TX_LOW  0b01
 ;.define TX_IDLE 0b00
 
-; Actual patterns when using a driver (ACTIVE)
-; Pin 0 (tx_pin_base): ENABLE - stays HIGH during transmission
-; Pin 1 (tx_pin_base+1): DATA - toggles to create differential signal
-.define TX_HIGH 0b11  ; Enable=1, Data=1
-.define TX_LOW  0b01  ; Enable=1, Data=0
-.define TX_IDLE 0b00  ; Enable=0, Data=0
+; Actual patterns when using a driver
+.define TX_HIGH 0b11
+.define TX_LOW  0b10
+.define TX_IDLE 0b00
 
 ; length of half-bit pulses (multipled by 6.7ns)
-; With clock divider 1.120: actual cycle = 9.84ns
-; CS_PULSE_LEN = 25 gives 24 cycles = ~236ns per CS pulse (≈240ns)
-; DATA_PULSE_LEN = 11 gives 10 cycles = ~100ns per half-pulse
 
-.define CS_PULSE_LEN   25
-.define DATA_PULSE_LEN 11
+.define CS_PULSE_LEN   30
+.define DATA_PULSE_LEN 10
 
 ; the reply sampling points (multiplied by 6.7ns)
 
 .define SAMPLE_POS_1   6
 .define SAMPLE_POS_2  16
 
-; how long to wait for the reply (tuned for 1us bit period = 102 cycles @ 9.8ns/cycle)
-; Note: Must be <= 31 (PIO 'set' instruction limit)
+; how long to wait for the reply (multiplied by 20ns)
 
-.define REPLY_WAIT 21
+.define REPLY_WAIT 30
 
 .program isospi_master
 .wrap_target
@@ -37,8 +31,8 @@
     out y, 8
 
     ; do the chip select pattern
-    set pins TX_LOW [CS_PULSE_LEN-1]
-    set pins TX_HIGH  [CS_PULSE_LEN-1]
+    set pins TX_HIGH [CS_PULSE_LEN-1]
+    set pins TX_LOW  [CS_PULSE_LEN-1]
     set pins TX_IDLE [31]
 
     ;set y, 31
@@ -68,8 +62,8 @@ zero_bit:
     set pins, TX_HIGH [DATA_PULSE_LEN-1]
 
 done:
-    ; go idle and wait for the lines to settle (tuned for 1us bit period)
-    set pins, TX_IDLE [9]
+    ; go idle and wait for the lines to settle
+    set pins, TX_IDLE [15]
     
     ; RECV PHASE
     ; unfortunately our bit-wait loop is 3 cycles long, so our sampling is going to be rather sloppy...
@@ -126,9 +120,9 @@ recv_done:
     nop
     nop
 
-    ; end chip select (this is a jump target - reverse of start CS)
-    set pins TX_HIGH  [CS_PULSE_LEN-1]
-    set pins TX_LOW [CS_PULSE_LEN-1]
+    ; end chip select (this is a jump target)
+    set pins TX_LOW  [31]
+    set pins TX_HIGH [31]
     set pins TX_IDLE [31]
 
 .wrap
@@ -169,7 +163,7 @@ void isospi_master_program_init(PIO pio, uint sm, uint offset, uint tx_pin_base,
     // Shift to right, autopush with threshold 32
     sm_config_set_in_shift(&c, false, true, 32);
     sm_config_set_in_pin_base(&c, rx_pin_base);
-    sm_config_set_in_pin_count(&c, 2);  // CL: FIXED - should be pin count (2), not pin base
+    sm_config_set_in_pin_count(&c, rx_pin_base);
 
     sm_config_set_clkdiv_int_frac8(&c, 1, 120);
 

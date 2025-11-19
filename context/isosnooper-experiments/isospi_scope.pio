@@ -1,0 +1,139 @@
+.pio_version 0
+
+.program isospi_scope
+.wrap_target
+
+recv_wait:
+    ; read the two input pins into x
+    mov x, pins
+    ; if zero, go round again
+    jmp !x recv_wait
+
+    ; copy both pins into the ISR
+    in x, 2
+
+recv:
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+    ; read both pins into x
+    mov x, pins
+    ; copy both pins into the ISR
+    in x, 2
+    ; if nonzero, go round again
+    jmp x-- recv
+
+
+;    set y, 10
+
+;recv_zero:
+    ; read both pins into x
+;    mov x, pins
+    ; copy both pins into the ISR
+;    in x, 2
+    ; if nonzero, go back to receiving
+;    jmp x-- recv
+    ; if y is nonzero, go round gain
+;    jmp y-- recv_zero
+
+    ; we've received lots of consecutive zeros, go back to waiting by wrapping
+
+.wrap
+
+% c-sdk {
+// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+
+void isospi_scope_pio_setup(PIO pio, uint sm, uint offset, uint rx_pin_base, int invert) {
+    // we don't need to init GPIOs as inputs
+
+    // gpio_init(rx_pin_base);
+    // gpio_set_dir(rx_pin_base, GPIO_IN);
+    // gpio_pull_up(rx_pin_base);
+
+    // gpio_init(rx_pin_base + 1);
+    // gpio_set_dir(rx_pin_base + 1, GPIO_IN);
+    // gpio_pull_up(rx_pin_base + 1);
+
+
+    // if(invert) {
+        // invert both RX pins
+    //     gpio_set_inover(rx_pin_base, GPIO_OVERRIDE_INVERT);
+    //     gpio_set_inover(rx_pin_base + 1, GPIO_OVERRIDE_INVERT);
+    // }
+
+    pio_sm_config c = isospi_scope_program_get_default_config(offset);
+
+    // Shift to right, autopush with threshold 32
+    sm_config_set_in_shift(&c, false, true, 32);
+    sm_config_set_in_pin_base(&c, rx_pin_base);
+    sm_config_set_in_pin_count(&c, 2); // rx_pin_base and rx_pin_base+1
+
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    // diagnostic output showing sampling points
+    //pio_gpio_init(pio, sampling_pin);
+    //pio_sm_set_consecutive_pindirs(pio, sm, sampling_pin, 1, true);
+    //sm_config_set_sideset_pins(&c, sampling_pin);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}
+
+
+
+
