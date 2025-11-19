@@ -247,25 +247,19 @@ static void isospi_get_data(uint8_t reg_cmd) {
     // Initialize buffer to 0x00
     memset(response_buffer, 0x00, 72);
     
-    char tx[2], rx[2];
-    
+    char tx[80], rx[80];
+
     // Send command (PIO generates CS pulses)
     tx[0] = reg_cmd;
     tx[1] = 0x00;
-    isospi_write_read_blocking(tx, rx, 2);
-    
     // Send CRC (PIO generates CS pulses)
-    tx[0] = crc;
-    tx[1] = 0x00;
-    isospi_write_read_blocking(tx, rx, 2);
-    
-    // Read 12 bytes of response in one continuous transaction (PIO generates CS pulses)
-    char tx_read[12] = {0};  // Send 12 zero bytes
-    char read_buf[12] = {0};  // Receive 12 bytes of data
-    isospi_write_read_blocking(tx_read, read_buf, 12);
-    
+    tx[2] = crc;
+    tx[3] = 0x00;
+
+    isospi_write_read_blocking(tx, rx, 16);
+
     // Copy to response_buffer (same format as batman_get_data)
-    memcpy(response_buffer, read_buf, 12);
+    memcpy(response_buffer, rx+4, 12);
 }
 
 /**
@@ -473,7 +467,14 @@ static void batman_simple_test(void) {
     // PHASE 2: Parse and display results (after all commands sent)
     // ============================================================
     
-    printf("\n=== BMS READ COMPLETE ===\n");
+    printf("\n=== BMS READ COMPLETE (Batman SPI) ===\n");
+    
+    // Print raw response data
+    printf("RAW RX: ");
+    for (int i = 0; i < 12; i++) {
+        printf("%02X ", (uint8_t)response_buffer[i]);
+    }
+    printf("\n");
     
     // Simplified output - just show BMB 0 cell voltages
     int valid_cells = 0;
@@ -538,6 +539,13 @@ static void isospi_simple_test(void) {
     // ============================================================
     
     printf("\n=== BMS READ COMPLETE (isoSPI Master) ===\n");
+    
+    // Print raw response data
+    printf("RAW RX: ");
+    for (int i = 0; i < 12; i++) {
+        printf("%02X ", (uint8_t)response_buffer[i]);
+    }
+    printf("\n");
     
     // Simplified output - just show BMB 0 cell voltages
     int valid_cells = 0;

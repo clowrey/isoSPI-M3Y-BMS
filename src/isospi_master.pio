@@ -23,7 +23,7 @@
 ; the reply sampling points (multiplied by 6.7ns)
 
 .define SAMPLE_POS_1   6
-.define SAMPLE_POS_2  16
+.define SAMPLE_POS_2  18
 
 ; how long to wait for the reply (tuned for 1us bit period = 102 cycles @ 9.8ns/cycle)
 ; Note: Must be <= 31 (PIO 'set' instruction limit)

@@ -51,7 +51,7 @@ bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
     // This is timing-critical for Batman IC which needs ~5us to wake up SPI interface
     pio_sm_put_blocking(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM, cs_front_porch_delay << 24);
 
-    sleep_us(5);
+    sleep_us(1);
 
     bool valid = true;
     for(size_t i = 0; i < len; i++) {
@@ -75,10 +75,10 @@ bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
                 in_buf[i] = (in_buf[i] << 1) | 0x0;
             }
         }
-        sleep_us(1); // - creates unnecessary gaps between bytes
+        //sleep_us(1); // - creates unnecessary gaps between bytes
     }
 
-    sleep_us(5);
+    //sleep_us(5);
 
     // Jump to end chip select sequence (instruction 29 from program start)
     // CRITICAL: Use relative offset, not absolute address!
