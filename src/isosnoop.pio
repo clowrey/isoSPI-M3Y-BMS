@@ -8,11 +8,12 @@
 .define SAMPLE_POS_1   3  ; must be between 3 and 18 inclusive
 .define SAMPLE_XTRA    0 
 .define SAMPLE_POS_2  13  ; must be between SAMPLE_POS_1+17 and SAMPLE_POST_1+32
-.define SAMPLE_END    24  ; reduced to keep delay within 15-cycle limit
+.define SAMPLE_END    28  ; CRITICAL: Max total delay is 15 with side_set (28-13-1=14)
 
 ; the min recordable gap width - multiplied by 20ns
+; Increased to match longer CS pulses (CS_PULSE_LEN=31, ~305ns)
 
-.define MIN_GAP 12
+.define MIN_GAP 18
 
 
 .wrap_target

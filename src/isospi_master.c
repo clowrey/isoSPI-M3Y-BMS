@@ -102,12 +102,12 @@ void isospi_invert_first_chip_select(bool invert) {
     
     // Change the bit pattern of the first two 'set pins' instructions
     // TX_HIGH = 0b11 (value 3), TX_LOW = 0b01 (value 1)
-    // CS_PULSE_LEN = 25, so delay = 24
-    // From compiled PIO: set pins, 1 [24] = 0xf801, set pins, 3 [24] = 0xf803
-    // Normal order: TX_LOW, TX_HIGH = 0xf801, 0xf803 (CS0 CS1)
-    // Inverted order: TX_HIGH, TX_LOW = 0xf803, 0xf801 (CS1 CS0)
-    ISOSPI_MASTER_PIO->instr_mem[pio_program_offset + 1] = invert ? 0xf803 : 0xf801;
-    ISOSPI_MASTER_PIO->instr_mem[pio_program_offset + 2] = invert ? 0xf801 : 0xf803;
+    // CS_PULSE_LEN = 31, so delay = 30 (0x1E)
+    // From compiled PIO: set pins, 1 [30] = 0xfe01, set pins, 3 [30] = 0xfe03
+    // Normal order: TX_LOW, TX_HIGH = 0xfe01, 0xfe03 (CS0 CS1)
+    // Inverted order: TX_HIGH, TX_LOW = 0xfe03, 0xfe01 (CS1 CS0)
+    ISOSPI_MASTER_PIO->instr_mem[pio_program_offset + 1] = invert ? 0xfe03 : 0xfe01;
+    ISOSPI_MASTER_PIO->instr_mem[pio_program_offset + 2] = invert ? 0xfe01 : 0xfe03;
 }
 
 void isospi_set_cs_delay(uint8_t delay_cycles) {

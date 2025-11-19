@@ -14,10 +14,10 @@
 
 ; length of half-bit pulses (multipled by 6.7ns)
 ; With clock divider 1.120: actual cycle = 9.84ns
-; CS_PULSE_LEN = 25 gives 24 cycles = ~236ns per CS pulse (≈240ns)
+; CS_PULSE_LEN = 31 gives 31 cycles = ~305ns per CS pulse (max single-instruction delay)
 ; DATA_PULSE_LEN = 11 gives 10 cycles = ~100ns per half-pulse
 
-.define CS_PULSE_LEN   25
+.define CS_PULSE_LEN   31
 .define DATA_PULSE_LEN 11
 
 ; the reply sampling points (multiplied by 6.7ns)

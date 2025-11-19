@@ -151,6 +151,7 @@ static void batman_wakeup(void) {
     
     // Send wakeup once (testing single wakeup) - NO PRINTF for precise timing
     gpio_put(TESLA_BMS_PIN_CS, 0);
+    sleep_us(5);
     
     uint8_t cmd_bytes[2];
     cmd_bytes[0] = (wakeup_cmd >> 8) & 0xFF;
@@ -576,92 +577,7 @@ static void isospi_simple_test(void) {
 /**
  * @brief Run isoSPI master test (same commands as Batman but via PIO)
  */
-static void isospi_master_test(void) {
-    printf("\n=== Running isoSPI Master Test (PIO2) ===\n");
-    
-    // Same command sequence as isospi_simple_test()
-    bool valid;
-    char tx[2], rx[2];
-    
-    // Command 1: WAKEUP (with inverted CS: CS1 CS0 instead of CS0 CS1)
-    isospi_invert_first_chip_select(true);
-    tx[0] = (CMD_WAKEUP >> 8) & 0xFF;
-    tx[1] = CMD_WAKEUP & 0xFF;
-    valid = isospi_write_read_blocking(tx, rx, 2);
-    isospi_invert_first_chip_select(false);  // Restore normal CS pattern
-    sleep_us(120);  // CL: 120us delay after wakeup
-    
-    // Command 2: IDLE_WAKE
-    tx[0] = (CMD_IDLE_WAKE >> 8) & 0xFF;
-    tx[1] = CMD_IDLE_WAKE & 0xFF;
-    valid = isospi_write_read_blocking(tx, rx, 2);
-    sleep_us(70);  // CL: 70us delay after idle_wake
-    
-    // Command 3: SNAPSHOT
-    tx[0] = (CMD_SNAPSHOT >> 8) & 0xFF;
-    tx[1] = CMD_SNAPSHOT & 0xFF;
-    valid = isospi_write_read_blocking(tx, rx, 2);
-    
-    char read_buf[20] = {0};
-    /*
-    // Command 4: READ_A with CRC
-    uint8_t cmd_bytes[2] = {CMD_READ_A, 0x00};
-    uint8_t crc = batman_calc_crc(cmd_bytes, 2);
-    
-    // Send command word
-    tx[0] = CMD_READ_A;
-    tx[1] = 0x00;
-    valid = isospi_write_read_blocking(tx, rx, 2);
-    
-    // Send CRC word
-    tx[0] = crc;
-    tx[1] = 0x00;
-    valid = isospi_write_read_blocking(tx, rx, 2);
-    
-    // Read response (same as Batman - read 12 bytes)
-    
-    
-    for (int i = 0; i <= 10; i += 2) {  // CL: <= to match Batman (6 iterations = 12 bytes)
-        tx[0] = 0x00;
-        tx[1] = 0x00;
-        valid = isospi_write_read_blocking(tx, rx, 2);
-        if (i < 20) {  // Don't overflow buffer
-            read_buf[i] = rx[0];
-            read_buf[i + 1] = rx[1];
-        }
-    }
-    */
-    
-    // Parse and display voltages (same logic as Batman)
-    printf("\n=== isoSPI READ COMPLETE ===\n");
-    
-    int valid_cells = 0;
-    int bmb = 0;
-    
-    printf("BMB0: ");
-    for (int cell = 0; cell <= 2; cell++) {  // Cells 0-2
-        int idx = (bmb * 9) + (cell * 2);
-        if (idx + 1 < 20) {
-            uint16_t tempvol = read_buf[idx + 1] * 256 + read_buf[idx];
-            
-            if (tempvol != 0xFFFF && tempvol != 0x0000) {
-                uint16_t voltage_mv = tempvol / 12.5;
-                printf("C%d=%.3fV ", cell, voltage_mv / 1000.0f);
-                valid_cells++;
-            } else {
-                printf("C%d=INV ", cell);
-            }
-        }
-    }
-    
-    if (valid_cells > 0) {
-        printf("✓\n");
-    } else {
-        printf("✗\n");
-    }
-    
-    printf("======================================\n\n");
-}
+
 
 /**
  * @brief State machine - alternates between Batman SPI and isoSPI Master tests
