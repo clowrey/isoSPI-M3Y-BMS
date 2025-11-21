@@ -1,52 +1,33 @@
 .pio_version 0 // only requires PIO version 0
 
-; Patterns when testing (DISABLED - for direct differential drive)
-;.define TX_HIGH 0b01
-;.define TX_LOW  0b10
+; Patterns when testing
+;.define TX_HIGH 0b10
+;.define TX_LOW  0b01
 ;.define TX_IDLE 0b00
 
-; Actual patterns when using a driver (ACTIVE)
-; Pin 0 (tx_pin_base): ENABLE - stays HIGH during transmission
-; Pin 1 (tx_pin_base+1): DATA - toggles to create differential signal
-.define TX_HIGH 0b11  ; Enable=1, Data=1
-.define TX_LOW  0b01  ; Enable=1, Data=0
-.define TX_IDLE 0b00  ; Enable=0, Data=0
+; Actual patterns when using a driver
+.define PUBLIC TX_HIGH 0b11
+.define PUBLIC TX_LOW  0b10
+.define PUBLIC TX_IDLE 0b00
 
 ; length of half-bit pulses (multipled by 6.7ns)
-; With clock divider 1.120: actual cycle = 9.84ns
-; CS_PULSE_LEN = 31 gives 31 cycles = ~305ns per CS pulse (max single-instruction delay)
-; DATA_PULSE_LEN = 11 gives 10 cycles = ~100ns per half-pulse
 
-.define CS_PULSE_LEN   31
-.define DATA_PULSE_LEN 11
+.define CS_PULSE_LEN_A   30
+.define CS_PULSE_LEN_B   14
+.define DATA_PULSE_LEN   15
 
 ; the reply sampling points (multiplied by 6.7ns)
 
-.define SAMPLE_POS_1   6
-.define SAMPLE_POS_2  18
+.define SAMPLE_POS_1  10   ; 5 - 16 works
+.define SAMPLE_POS_2  25
 
-; how long to wait for the reply (tuned for 1us bit period = 102 cycles @ 9.8ns/cycle)
-; Note: Must be <= 31 (PIO 'set' instruction limit)
+; how long to wait for the reply (multiplied by 20ns)
 
-.define REPLY_WAIT 21
+
+
 
 .program isospi_master
 .wrap_target
-
-    ; wait for a byte before we start (we'll junk it)
-    out y, 8
-
-    ; do the chip select pattern
-    set pins TX_LOW [CS_PULSE_LEN-1]
-    set pins TX_HIGH  [CS_PULSE_LEN-1]
-    set pins TX_IDLE [31]
-
-    ;set y, 31
-    ; delay after chip select
-start_wait:
-    jmp y-- start_wait
-
-    ; TRANSMIT PHASE
 
 do_bit:
 
@@ -56,7 +37,9 @@ do_bit:
     jmp !x zero_bit
 
     ; output a 1
+  PUBLIC data_high_1:
     set pins, TX_HIGH [DATA_PULSE_LEN-1]
+  PUBLIC data_low_1:
     set pins, TX_LOW  [DATA_PULSE_LEN-1]
     jmp done
 
@@ -64,80 +47,98 @@ do_bit:
 
 zero_bit:
     ; output a 0
+  PUBLIC data_low_2:
     set pins, TX_LOW  [DATA_PULSE_LEN-1]
+  PUBLIC data_high_2:
     set pins, TX_HIGH [DATA_PULSE_LEN-1]
 
 done:
-    ; go idle and wait for the lines to settle (tuned for 1us bit period)
-    set pins, TX_IDLE [9]
-    
-    ; RECV PHASE
-    ; unfortunately our bit-wait loop is 3 cycles long, so our sampling is going to be rather sloppy...
+    ; go idle and wait for the lines to settle
+  PUBLIC pre_rx:
+    set pins, TX_IDLE [15] ; min 10?, too long and we miss the reply
 
-    ; other options:
-    ; - OR the inputs externally into another input, and jmp pin (gets it down to 2 cycles?)
+    ; start the timer
+    irq set 1
 
+    ; clear any pending irq
+    irq clear 0
 
-    ; simulate a delay before the reply
-    ;nop [30]
-    ;nop [18]
+    ; wake up the wait-for-highers
+    irq clear 3
 
-    ; count down waiting for a reply
-    set y, REPLY_WAIT
-recv_wait:
-    ; read the two input pins
+    ; wait for a bit to start
+  PUBLIC sample_1:
+    wait 1 irq 0 [SAMPLE_POS_1 - 1]
+
+    ; pause the wait-for-highers
+    ;irq set 3 
+
+    ; first sample (also store it in x for later)
     mov x, pins
-    ; if nonzero, we got something
-    jmp x-- recv_started
-    ; keep waiting
-    jmp y-- recv_wait
+  PUBLIC sample_2:
+    in x, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 2]
 
-    ; no reply, store zeroes
-    in null, 4
-    jmp recv_done[1]
+    ; second sample (also store it in y for later)
+    mov y, pins
+    in y, 2
 
-recv_started:
-    nop [SAMPLE_POS_1 - 3]
-    ; first sample
-    in pins, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 1]
-    ; second sample
-    in pins, 2 [31]
-    
+    ; wait for the timer to finish
+    wait 1 irq 2 [3]
+.wrap
 
 
-recv_done:
+.program isospi_master_cs
+.wrap_target
 
-    ; just keep doing bits now
-    jmp do_bit
+    out x, 2
+    out y, 2
 
-
-    ; if there is still data in the buffer, go round again
-    ;jmp !osre do_bit
-
-    ; some more chances to continue before we end the transaction
-    ;jmp !osre do_bit [31]
-    ;jmp !osre do_bit [31]
-    ;jmp !osre do_bit [31]
-
-    nop
-    nop
-    nop
-    nop
-    nop
-    nop
-
-    ; end chip select (this is a jump target - reverse of start CS)
-    set pins TX_HIGH  [CS_PULSE_LEN-1]
-    set pins TX_LOW [CS_PULSE_LEN-1]
+    ; do the chip select pattern
+  PUBLIC cs_high_1:
+    mov pins x  [CS_PULSE_LEN_A-1]
+    mov pins x  [CS_PULSE_LEN_B-1]
+  PUBLIC cs_low_1:
+    mov pins y  [CS_PULSE_LEN_A-1]
+    mov pins y  [CS_PULSE_LEN_B-1]
     set pins TX_IDLE [31]
+.wrap
 
+
+.program isospi_master_wait_for_high
+.wrap_target
+    ; wait to be woken up (irq 3 gets cleared)
+    irq wait 3
+
+    wait 1 pin 0
+    irq set 0  ; [3]
+    wait 0 pin 0
+.wrap
+
+
+.program isospi_master_wait_for_gap
+.wrap_target
+    ; wait to be woken up
+    wait 1 irq 1 [30]
+    ; after a while, trigger the receiver
+    irq set 0 [31]
+    nop [31]
+    ; then trigger the next send
+    irq set 2
 .wrap
 
 
 % c-sdk {
 // this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
 
-void isospi_master_program_init(PIO pio, uint sm, uint offset, uint tx_pin_base, uint rx_pin_base) {
+#include "pico/stdlib.h"
+
+PIO master_pio;
+uint32_t master_offset;
+pio_sm_config master_config;
+uint32_t cs_program_offset;
+pio_sm_config cs_program_config;
+
+void isospi_master_program_init(PIO pio, uint tx_pin_base, uint rx_pin_base) {
     // Outputs
     pio_gpio_init(pio, tx_pin_base);
     pio_gpio_init(pio, tx_pin_base + 1);
@@ -156,25 +157,85 @@ void isospi_master_program_init(PIO pio, uint sm, uint offset, uint tx_pin_base,
     gpio_set_inover(rx_pin_base + 1, GPIO_OVERRIDE_INVERT);
 
     // Set outputs as PIO outputs
-    pio_sm_set_consecutive_pindirs(pio, sm, tx_pin_base, 2, true);
-    
-    //pio_sm_set_consecutive_pindirs(pio, sm, 2, 2, false); // GPIO 2+3 as input
+    pio_sm_set_consecutive_pindirs(pio, 0, tx_pin_base, 2, true);
 
-    pio_sm_config c = isospi_master_program_get_default_config(offset);
+    //////
+    
+    master_pio = pio;
+    master_offset = pio_add_program(pio, &isospi_master_program);
+    master_config = isospi_master_program_get_default_config(master_offset);
 
     // Shift to right, autopull with threshold 8
-    sm_config_set_out_shift(&c, false, true, 8);
-    sm_config_set_set_pins(&c, tx_pin_base, 2);
+    sm_config_set_out_shift(&master_config, false, true, 8);
+    sm_config_set_set_pins(&master_config, tx_pin_base, 2);
 
     // Shift to right, autopush with threshold 32
-    sm_config_set_in_shift(&c, false, true, 32);
-    sm_config_set_in_pin_base(&c, rx_pin_base);
-    sm_config_set_in_pin_count(&c, 2);  // CL: FIXED - should be pin count (2), not pin base
+    sm_config_set_in_shift(&master_config, false, true, 32);
+    sm_config_set_in_pin_base(&master_config, rx_pin_base);
+    sm_config_set_in_pin_count(&master_config, 2);
 
-    sm_config_set_clkdiv_int_frac8(&c, 1, 120);
+    // Clock divider to achieve 1MHz isoSPI rate (1µs per bit)
+    // 1.333 divider: int=1, frac=85 (85/256 ≈ 0.332)
+    sm_config_set_clkdiv_int_frac8(&master_config, 1, 85);
 
-    //sm_config_set_set_pins(&c, rts_pin, 1);
+    pio_sm_init(pio, 0, master_offset, &master_config);
 
-    pio_sm_init(pio, sm, offset, &c);
+    //////
+
+    // setup CS program/config but don't load it
+
+    cs_program_offset = pio_add_program(pio, &isospi_master_cs_program);
+    cs_program_config = isospi_master_cs_program_get_default_config(cs_program_offset);
+
+    // Shift to right, autopull with threshold 4
+    sm_config_set_out_shift(&cs_program_config, false, true, 4);
+    sm_config_set_out_pins(&cs_program_config, tx_pin_base, 2);
+    sm_config_set_set_pins(&cs_program_config, tx_pin_base, 2);
+
+    //////
+
+    uint32_t offset = pio_add_program(pio, &isospi_master_wait_for_high_program);
+    pio_sm_config c2 = isospi_master_wait_for_high_program_get_default_config(offset);
+    sm_config_set_in_pin_base(&c2, rx_pin_base);
+    sm_config_set_in_pin_count(&c2, 1);
+    pio_sm_init(pio, 1, offset, &c2);
+
+    //////
+
+    pio_sm_config c3 = isospi_master_wait_for_high_program_get_default_config(offset);
+    sm_config_set_in_pin_base(&c3, rx_pin_base + 1);
+    sm_config_set_in_pin_count(&c3, 1);
+    pio_sm_init(pio, 2, offset, &c3);
+
+    //////
+
+    offset = pio_add_program(pio, &isospi_master_wait_for_gap_program);
+    pio_sm_config c4 = isospi_master_wait_for_gap_program_get_default_config(offset);
+    // Match main SM clock divider for synchronized 1MHz timing
+    sm_config_set_clkdiv_int_frac8(&c4, 1, 85);
+    pio_sm_init(pio, 3, offset, &c4);
+
+    //////
+
+    pio_sm_set_enabled(pio, 0, true);
+    pio_sm_set_enabled(pio, 1, true);
+    pio_sm_set_enabled(pio, 2, true);
+    pio_sm_set_enabled(pio, 3, true);
 }
+
+void isospi_master_cs(bool start) {
+  // Load the CS program into sm0 and start it
+  pio_sm_init(master_pio, 0, cs_program_offset, &cs_program_config);
+  pio_sm_set_enabled(master_pio, 0, true);
+
+  // Send a CS
+  pio_sm_put_blocking(master_pio, 0, (start ? 0b1110 : 0b1011) << 28);
+
+  sleep_us(1);
+
+  // Load the master program back into sm0
+  pio_sm_init(master_pio, 0, master_offset, &master_config);
+  pio_sm_set_enabled(master_pio, 0, true);
+}
+
 %}

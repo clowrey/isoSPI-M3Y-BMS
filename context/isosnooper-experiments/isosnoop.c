@@ -22,8 +22,7 @@ uint32_t last_write_addr;
 void isosnoop_dma_setup(PIO pio, uint sm);
 
 void isosnoop_setup(uint rx_pin_base, int invert, uint sampling_pin) {
-    uint offset = pio_add_program(ISOSNOOP_MASTER_PIO, &isosnoop_program);
-    isosnoop_pio_setup(ISOSNOOP_MASTER_PIO, ISOSNOOP_MASTER_SM, offset, rx_pin_base, invert, sampling_pin);
+    isosnoop_pio_setup(ISOSNOOP_MASTER_PIO, rx_pin_base, invert, sampling_pin);
     isosnoop_dma_setup(ISOSNOOP_MASTER_PIO, ISOSNOOP_MASTER_SM);
 
     dma_chan = dma_channel_hw_addr(dma_channel_rx);

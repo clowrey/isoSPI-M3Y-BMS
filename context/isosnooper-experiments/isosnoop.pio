@@ -1,61 +1,71 @@
-.pio_version 0 // only requires PIO version 0
+.pio_version 0
 
 .program isosnoop
 .side_set 1
 
 ; the sampling points - multiplied by 6.7ns
 
-.define SAMPLE_POS_1   6  ; must be between 3 and 18 inclusive
-.define SAMPLE_XTRA    0 
-.define SAMPLE_POS_2  16  ; must be between SAMPLE_POS_1+17 and SAMPLE_POST_1+32
-.define SAMPLE_END    32
-
-; the min recordable gap width - multiplied by 20ns
-
-.define MIN_GAP 31
+.define SAMPLE_POS_1  5  ; 1 - 12 work  (100ns pulses)
+.define SAMPLE_POS_2  20
 
 
 .wrap_target
 
-    ; count down
-    set y, MIN_GAP side 0
 recv_wait:
-    ; read the two input pins
-    mov x, pins side 0
-    ; if nonzero, we got something
-    jmp x-- recv_started side 0
-    ; keep waiting
-    jmp y-- recv_wait side 0
+    ; clear any pending irq
+    irq clear 0 side 0
 
-    in null, 4 side 0 ; record the gap
-
-recv_wait2:
-    ; read the two input pins
-    mov x, pins side 0
-    ; if zero, keep waiting
-    jmp !x recv_wait2 side 0
+    ; wait for an interrupt from one of the detector state machines (or the timeout)
+    wait 1 irq 0 side 0 [SAMPLE_POS_1 - 1]
 
 recv_started:   
-    ; wait until the first sampling point
-    nop [SAMPLE_POS_1 - 3] side 0
-    ; first sample
-    in pins, 2 [SAMPLE_XTRA] side 1
-    nop [SAMPLE_POS_2 - SAMPLE_POS_1 - SAMPLE_XTRA - 2] side 1
-    ; second sample
-    in pins, 2 [SAMPLE_END - SAMPLE_POS_2 - 1] side 0
+    ; first sample (also store it in x for later)
+    mov x, pins side 1 
+    in x, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 2] side 1
 
-;wait_for_idle:
-;    mov x, pins side 0
-;    jmp x--, wait_for_idle side 0
+    ; second sample (also store it in y for later)
+    mov y, pins side 0
+    in y, 2 [15] side 0
 
+    jmp x-- received_something side 0
+    jmp y-- received_something side 0
+    jmp recv_wait side 0
+
+received_something:
+    ; we received data (this wasn't a gap)
+
+    nop [3] side 0
+
+    ; start the timer
+    irq set 1 side 0
 
 .wrap
+
+.program isosnoop_wait_for_high
+
+.wrap_target
+    wait 1 pin 0
+    irq set 0 [20]
+    wait 0 pin 0 [20]
+.wrap
+
+.program isosnoop_wait_for_gap
+
+.wrap_target
+    ; wait to be woken up
+    wait 1 irq 1 [31]
+    nop [15]
+    wait 0 irq 2
+    ; after a while, trigger the receiver
+    irq set 0   
+.wrap
+
 
 
 % c-sdk {
 // this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
 
-void isosnoop_pio_setup(PIO pio, uint sm, uint offset, uint rx_pin_base, int invert, uint sampling_pin) {
+void isosnoop_pio_setup(PIO pio, uint rx_pin_base, int invert, uint sampling_pin) {
     // we don't need to init GPIOs as inputs
 
     gpio_init(rx_pin_base);
@@ -73,6 +83,7 @@ void isosnoop_pio_setup(PIO pio, uint sm, uint offset, uint rx_pin_base, int inv
         gpio_set_inover(rx_pin_base + 1, GPIO_OVERRIDE_INVERT);
     }
 
+    uint offset = pio_add_program(pio, &isosnoop_program);
     pio_sm_config c = isosnoop_program_get_default_config(offset);
 
     // Shift to right, autopush with threshold 8
@@ -84,15 +95,65 @@ void isosnoop_pio_setup(PIO pio, uint sm, uint offset, uint rx_pin_base, int inv
 
     // diagnostic output showing sampling points
     pio_gpio_init(pio, sampling_pin);
-    pio_sm_set_consecutive_pindirs(pio, sm, sampling_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, 0, sampling_pin, 1, true);
     sm_config_set_sideset_pins(&c, sampling_pin);
 
     // ST thing is 3.42857x slower
     //sm_config_set_clkdiv_int_frac8(&c, 3, 112);
-    sm_config_set_clkdiv_int_frac8(&c, 1, 120);
+    //sm_config_set_clkdiv_int_frac8(&c, 1, 120);
+    sm_config_set_clkdiv_int_frac8(&c, 1, 0);
 
-    pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
+    pio_sm_init(pio, 0, offset, &c);
+
+    ////
+
+    offset = pio_add_program(pio, &isosnoop_wait_for_high_program);
+    pio_sm_config c2 = isosnoop_wait_for_high_program_get_default_config(offset);
+    sm_config_set_in_pin_base(&c2, rx_pin_base);
+    sm_config_set_in_pin_count(&c2, 1);
+    sm_config_set_clkdiv_int_frac8(&c2, 1, 0);
+
+    // another sampling pin for experiments
+    //int sampling_pin2 = 26;
+    //pio_gpio_init(pio, sampling_pin2);
+    //pio_sm_set_consecutive_pindirs(pio, 1, sampling_pin2, 1, true);
+    //sm_config_set_sideset_pins(&c2, sampling_pin2);
+
+    //sm_config_set_clkdiv_int_frac8(&c2, 1, 0);
+
+    pio_sm_init(pio, 1, offset, &c2);
+
+    ////
+
+    offset = pio_add_program(pio, &isosnoop_wait_for_high_program);
+    pio_sm_config c3 = isosnoop_wait_for_high_program_get_default_config(offset);
+    sm_config_set_in_pin_base(&c3, rx_pin_base + 1);
+    sm_config_set_in_pin_count(&c3, 1);
+    sm_config_set_clkdiv_int_frac8(&c3, 1, 0);
+
+    //int sampling_pin2 = 26;
+    //pio_gpio_init(pio, sampling_pin2);
+    //pio_sm_set_consecutive_pindirs(pio, 2, sampling_pin2, 1, true);
+    //sm_config_set_sideset_pins(&c3, sampling_pin2);
+
+    pio_sm_init(pio, 2, offset, &c3);
+
+    ////
+
+    offset = pio_add_program(pio, &isosnoop_wait_for_gap_program);
+    pio_sm_config c4 = isosnoop_wait_for_gap_program_get_default_config(offset);
+    sm_config_set_clkdiv_int_frac8(&c4, 1, 0);
+
+    pio_sm_init(pio, 3, offset, &c4);
+
+    ////
+
+    pio_sm_set_enabled(pio, 0, true);
+    pio_sm_set_enabled(pio, 1, true);
+    pio_sm_set_enabled(pio, 2, true);
+    pio_sm_set_enabled(pio, 3, true);
+
+
 }
 
 %}

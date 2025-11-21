@@ -90,14 +90,10 @@ void isospi_interface_test(void) {
     char tx[2], rx[2];
     bool valid;
     
-    // Command 1: WAKEUP (0x2AD4) with inverted CS: CS1 CS0
-    printf("\n1. WAKEUP (0x2AD4) - with inverted CS (CS1 CS0):\n");
-    isospi_invert_first_chip_select(true);
-    tx[0] = 0x2A; tx[1] = 0xD4;
-    printf("   TX: 0x%02X 0x%02X\n", (uint8_t)tx[0], (uint8_t)tx[1]);
-    valid = isospi_write_read_blocking(tx, rx, 2);
-    printf("   RX: 0x%02X 0x%02X [%s]\n", (uint8_t)rx[0], (uint8_t)rx[1], valid ? "VALID" : "INVALID");
-    isospi_invert_first_chip_select(false);  // Restore normal CS
+    // Command 1: WAKEUP (0x2AD4) - CS1 CS0 pattern handled by isospi_wakeup()
+    printf("\n1. WAKEUP (0x2AD4) - with CS1 CS0 pattern:\n");
+    isospi_wakeup();
+    printf("   Wakeup complete\n");
     sleep_us(150);  // CL: tREADY min 150us for Batman IC
     
     // Command 2: UNMUTE/IDLE_WAKE (0x21F2) with normal CS
