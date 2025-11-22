@@ -316,10 +316,10 @@ void isosnoop_print_buffer() {
                 }
                 
                 // Decode cell voltages from MISO buffer
-                // Cell data starts at MISO[1] - Cell0 is at bytes [1-2]
+                // Cell data starts at MISO[2] - skip initial gap markers (00 00)
                 printf("BMB0: ");
                 for(int cell = 0; cell < 3; cell++) {
-                    int idx = 1 + (cell * 2);  // Cell data starts at MISO[1] (ODD offset!)
+                    int idx = 2 + (cell * 2);  // Cell data starts at MISO[2] (skip 2 gap bytes)
                     if(idx + 1 < miso_idx) {
                         // Use LOW,HIGH byte order to match batman.c
                         uint16_t raw = (miso_buffer[idx + 1] << 8) | miso_buffer[idx];

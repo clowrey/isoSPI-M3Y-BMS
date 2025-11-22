@@ -203,7 +203,7 @@ done:
 .program isospi_master_wait_for_gap
 .wrap_target
     ; wait to be woken up (SM0 sets IRQ 1 when starting receive phase)
-    wait 1 irq 1 [31]
+    wait 1 irq 1 [31]     ; 32 cycles = 213ns
     ; after a delay, trigger the receiver (timeout if no edge detected by SM1/SM2)
     irq set 0 [31]        ; Set IRQ 0 to force SM0 to sample even without edge
     nop [31]              ; Additional delay
