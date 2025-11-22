@@ -40,7 +40,7 @@ void isospi_master_setup(uint tx_pin_base, uint rx_pin_base);
  * 
  * Note: Includes automatic CS pulse generation via new CS algorithm.
  */
-bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len);
+bool isospi_write_read_blocking(unsigned char* out_buf, unsigned char* in_buf, size_t len);
 
 /**
  * @brief Flush RX FIFO
@@ -112,7 +112,7 @@ void isospi_send_command(uint16_t cmd_word);
  * 
  * Sends: [reg_cmd] [0x00] [0x70] [0x00] then reads response_len bytes continuously.
  */
-void isospi_get_data(uint8_t reg_cmd, char* response_buffer, size_t response_len);
+void isospi_get_data(uint8_t reg_cmd, unsigned char* response_buffer, size_t response_len);
 
 #ifdef __cplusplus
 }

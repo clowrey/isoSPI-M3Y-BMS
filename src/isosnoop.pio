@@ -126,7 +126,7 @@ received_something:
     ; Set up counter for timeout (~600ns = ~90 cycles at 150MHz)
     set x, 3            ; Use X as loop counter (3 iterations)
 timer_loop:
-    nop [14]            ; 15 cycles per iteration
+    nop [15]            ; 15 cycles per iteration
     jmp x-- timer_loop  ; 1 cycle (total 16 cycles per iteration)
     ; Timer expired - check GP12 (edge detection flag from main receiver)
     mov x, pins         ; Read GPIO pins (bit 0 = GP12 state)

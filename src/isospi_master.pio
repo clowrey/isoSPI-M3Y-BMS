@@ -43,8 +43,8 @@
 
 ; the reply sampling points (multiplied by 6.67ns @ 150MHz)
 ; These define when to sample the incoming RX signals during reception
-.define SAMPLE_POS_1  2   ; First sample at 67ns into bit period (5-16 works)
-.define SAMPLE_POS_2  16   ; Second sample at 167ns into bit period
+.define SAMPLE_POS_1  6   ; First sample at 67ns into bit period (5-16 works) CL - DO NOT CHANGE THESE TIMINGS WITHOUT GOOD REASON
+.define SAMPLE_POS_2  22   ; Second sample at 167ns into bit period
 
 ; how long to wait for the reply (multiplied by 20ns)
 ; (Timer is managed by wait_for_gap state machine)
@@ -100,7 +100,7 @@ done:
     ; ========================================
     ; After transmitting, switch to idle and prepare to receive response
   PUBLIC pre_rx:
-    set pins, TX_IDLE [15] side 0 ; Go idle, wait for lines to settle (max 15 with sideset)
+    set pins, TX_IDLE [10] side 0 ; Go idle, wait for lines to settle (max 15 with sideset)
 
     ; Coordinate with helper state machines using IRQ flags:
     ; IRQ 0: Edge detection trigger (set by SM1/SM2 when edge detected)
@@ -135,7 +135,8 @@ done:
     in y, 2 side 0                          ; Push to FIFO (autopush at 32 bits = 8 samples)
 
     ; wait for the inter-bit timer to finish before next bit
-    wait 1 irq 2 [3] side 0
+    ;wait 1 irq 2 [3] side 0
+    irq wait 2 [3] side 0
 .wrap
 
 
@@ -208,7 +209,7 @@ done:
     irq set 0 [31]        ; Set IRQ 0 to force SM0 to sample even without edge
     nop [31]              ; Additional delay
     ; then trigger the next send (signal SM0 that inter-bit gap is complete)
-    irq set 2
+    irq clear 2
 .wrap
 
 

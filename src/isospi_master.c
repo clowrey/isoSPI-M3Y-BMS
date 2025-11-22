@@ -74,11 +74,29 @@ void isospi_tune(
     //SET_DELAY(isospi_master_offset_post_rx, post_rx_delay - 1);
 }
 
-bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
+// Reverse the bits within a nibble using a lookup table
+uint8_t reverse_nibble_lut(uint8_t n) {
+    // Only 16 possible values (0-15)
+    // Index 0 (0000) -> 0 (0000)
+    // Index 1 (0001) -> 8 (1000)
+    // ...
+    // Index 11 (1011) -> 13 (1101)
+    static const uint8_t lookup[16] = {
+        0x0, 0x8, 0x4, 0xC, 
+        0x2, 0xA, 0x6, 0xE, 
+        0x1, 0x9, 0x5, 0xD, 
+        0x3, 0xB, 0x7, 0xF
+    };
+    
+    // Mask input with 0x0F to ensure we only look at the lower nibble
+    return lookup[n & 0x0F];
+}
+
+bool isospi_write_read_blocking(unsigned char* out_buf, unsigned char* in_buf, size_t len) {
 
     isospi_master_cs(false);  // Normal data CS pattern (CS0 CS1) - NOT wakeup pattern!
 
-    sleep_us(5);  // CL: CS front porch - Batman IC needs ~5µs after CS before data
+    sleep_us(3);  // CL: CS front porch - Batman IC needs ~5µs after CS before data
 
     bool valid = true;
     for(size_t i=0; i<len; i++) {
@@ -88,21 +106,10 @@ bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
         // Each response bit is encoded as a nibble in a 32 bit word
         uint32_t v = pio_sm_get_blocking(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM);
         
-        // CL: Debug - print first few bytes' nibbles
-        if(i < 8) {
-            printf("RX byte %d nibbles: ", i);
-            uint32_t v_debug = v;
-            for(int d=0; d<8; d++) {
-                printf("%X ", (v_debug >> 28) & 0xf);
-                v_debug <<= 4;
-            }
-            printf("\n");
-        }
-        
+        // Process nibbles from LSB to MSB
         for(int r=0; r<8; r++) {
-            uint8_t nibble = (v >> 28) & 0xf;
-            v <<= 4;
-            // CL: Original Manchester decoding (revert the swap)
+            uint8_t nibble = v & 0xf;
+            v >>= 4;
             if(nibble==0b1001) {
                 // bit 1
                 in_buf[i] = (in_buf[i] << 1) | 0x1;
@@ -110,16 +117,23 @@ bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
                 // bit 0
                 in_buf[i] = (in_buf[i] << 1) | 0x0;
             } else {
-                // invalid - but still decode as 0
+                // invalid
                 valid = false;
                 in_buf[i] = (in_buf[i] << 1) | 0x0;
             }
         }
         
-        // CL: 2.5µs inter-byte gap (except after last byte)
-        if(i < len - 1) {
-            sleep_us(3);  // ~2.5µs gap between bytes for Batman IC processing
+        // Don't swap nibbles - bytes are correct as-is
+        
+        // CL: Debug - print decoded byte for first few bytes
+        if(i < 24) {
+            printf("  decoded: 0x%02X\n", in_buf[i]);
         }
+        
+        // CL: 2.5µs inter-byte gap (except after last byte)
+        //if(i < len - 1) {
+        //    sleep_us(3);  // ~2.5µs gap between bytes for Batman IC processing
+        //}
     }
 
     // perform final ending chip select immediately after data
@@ -313,8 +327,8 @@ void isospi_wakeup(void) {
 
 void isospi_send_command(uint16_t cmd_word) {
     // Send a 16-bit command with normal CS pattern
-    char tx[2];
-    char rx[2] = {0};
+    unsigned char tx[2];
+    unsigned char rx[2] = {0};
     
     // Split 16-bit command into 2 bytes (MSB first)
     tx[0] = (cmd_word >> 8) & 0xFF;
@@ -323,12 +337,12 @@ void isospi_send_command(uint16_t cmd_word) {
     isospi_write_read_blocking(tx, rx, 2);
 }
 
-void isospi_get_data(uint8_t reg_cmd, char* response_buffer, size_t response_len) {
+void isospi_get_data(uint8_t reg_cmd, unsigned char* response_buffer, size_t response_len) {
     // Read data with command and CRC
     // Sends: [reg_cmd] [0x00] [0x70] [0x00] then reads response_len bytes continuously
     
-    char tx[4 + response_len];
-    char rx[4 + response_len];
+    unsigned char tx[4 + response_len];
+    unsigned char rx[4 + response_len];
     
     // Build command packet
     tx[0] = reg_cmd;
@@ -349,3 +363,4 @@ void isospi_get_data(uint8_t reg_cmd, char* response_buffer, size_t response_len
         response_buffer[i] = rx[4 + i];
     }
 }
+
