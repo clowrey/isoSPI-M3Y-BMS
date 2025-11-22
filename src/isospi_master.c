@@ -25,8 +25,8 @@ void isospi_master_setup(uint tx_pin_base, uint rx_pin_base) {
     // rx_pin_base + 1  is the low rx data pin
 
     printf("isoSPI Master: Initializing multi-SM architecture...\n");
-    isospi_master_program_init(ISOSPI_MASTER_PIO, tx_pin_base, rx_pin_base);
-    printf("isoSPI Master: Initialized on PIO2 (4 SMs) (TX: GP%d-GP%d, RX: GP%d-GP%d)\n", 
+    isospi_master_program_init(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM, tx_pin_base, rx_pin_base);
+    printf("isoSPI Master: Initialized on PIO2 (4 SMs) (TX: GP%d-GP%d, RX: GP%d-GP%d, sampling debug: GP13)\n", 
            tx_pin_base, tx_pin_base + 1, rx_pin_base, rx_pin_base + 1);
 }
 
@@ -88,9 +88,9 @@ bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
         // Each response bit is encoded as a nibble in a 32 bit word
         uint32_t v = pio_sm_get_blocking(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM);
         
-        // CL: Debug - print first byte's nibbles
-        if(i == 0) {
-            printf("RX nibbles byte 0: ");
+        // CL: Debug - print first few bytes' nibbles
+        if(i < 8) {
+            printf("RX byte %d nibbles: ", i);
             uint32_t v_debug = v;
             for(int d=0; d<8; d++) {
                 printf("%X ", (v_debug >> 28) & 0xf);
@@ -102,6 +102,7 @@ bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
         for(int r=0; r<8; r++) {
             uint8_t nibble = (v >> 28) & 0xf;
             v <<= 4;
+            // CL: Original Manchester decoding (revert the swap)
             if(nibble==0b1001) {
                 // bit 1
                 in_buf[i] = (in_buf[i] << 1) | 0x1;
@@ -109,7 +110,7 @@ bool isospi_write_read_blocking(char* out_buf, char* in_buf, size_t len) {
                 // bit 0
                 in_buf[i] = (in_buf[i] << 1) | 0x0;
             } else {
-                // invalid
+                // invalid - but still decode as 0
                 valid = false;
                 in_buf[i] = (in_buf[i] << 1) | 0x0;
             }

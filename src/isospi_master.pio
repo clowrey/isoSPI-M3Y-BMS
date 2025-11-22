@@ -43,8 +43,8 @@
 
 ; the reply sampling points (multiplied by 6.67ns @ 150MHz)
 ; These define when to sample the incoming RX signals during reception
-.define SAMPLE_POS_1  10   ; First sample at 67ns into bit period (5-16 works)
-.define SAMPLE_POS_2  25   ; Second sample at 167ns into bit period
+.define SAMPLE_POS_1  2   ; First sample at 67ns into bit period (5-16 works)
+.define SAMPLE_POS_2  16   ; Second sample at 167ns into bit period
 
 ; how long to wait for the reply (multiplied by 20ns)
 ; (Timer is managed by wait_for_gap state machine)
@@ -63,24 +63,25 @@
 ; ============================================================================
 
 .program isospi_master
+.side_set 1  // Uses 1 sideset pin for diagnostic output (shows sampling points during RX)
 .wrap_target
 
 do_bit:
 
     ; read a bit from the TX FIFO into X register
-    out x, 1
+    out x, 1 side 0
 
     ; jump based on bit value (x=0 goes to zero_bit, x=1 continues)
-    jmp !x zero_bit
+    jmp !x zero_bit side 0
 
     ; ========================================
     ; Transmit a logical '1': HIGH then LOW
     ; ========================================
   PUBLIC data_high_1:
-    set pins, TX_HIGH [DATA_PULSE_LEN-1]  ; 100ns HIGH pulse
+    set pins, TX_HIGH [DATA_PULSE_LEN-2] side 0  ; 100ns HIGH pulse (reduced by 1 for sideset)
   PUBLIC data_low_1:
-    set pins, TX_LOW  [DATA_PULSE_LEN-1]  ; 100ns LOW pulse
-    jmp done
+    set pins, TX_LOW  [DATA_PULSE_LEN-2] side 0  ; 100ns LOW pulse
+    jmp done side 0
 
     ; cheeky void space
 
@@ -89,9 +90,9 @@ zero_bit:
     ; Transmit a logical '0': LOW then HIGH
     ; ========================================
   PUBLIC data_low_2:
-    set pins, TX_LOW  [DATA_PULSE_LEN-1]  ; 100ns LOW pulse
+    set pins, TX_LOW  [DATA_PULSE_LEN-2] side 0  ; 100ns LOW pulse
   PUBLIC data_high_2:
-    set pins, TX_HIGH [DATA_PULSE_LEN-1]  ; 100ns HIGH pulse
+    set pins, TX_HIGH [DATA_PULSE_LEN-2] side 0  ; 100ns HIGH pulse
 
 done:
     ; ========================================
@@ -99,8 +100,7 @@ done:
     ; ========================================
     ; After transmitting, switch to idle and prepare to receive response
   PUBLIC pre_rx:
-    set pins, TX_IDLE [19] ; Go idle, wait for lines to settle (min 10 cycles)
-                           ; Balance: too long and we miss reply, too short and we sample noise
+    set pins, TX_IDLE [15] side 0 ; Go idle, wait for lines to settle (max 15 with sideset)
 
     ; Coordinate with helper state machines using IRQ flags:
     ; IRQ 0: Edge detection trigger (set by SM1/SM2 when edge detected)
@@ -109,33 +109,33 @@ done:
     ; IRQ 3: Edge detector gate (cleared=active, set=paused)
 
     ; start the timer (SM3 will wait for this)
-    irq set 1
+    irq set 1 [2] side 0          ; Add 3 cycles here to compensate for removed nop
 
     ; clear any pending edge detection irq
-    irq clear 0
+    irq clear 0 side 0
 
     ; wake up the edge detectors (SM1 and SM2)
-    irq clear 3
+    irq clear 3 side 0
 
     ; wait for an edge to be detected (or timeout from SM3)
   PUBLIC sample_1:
-    wait 1 irq 0 [SAMPLE_POS_1 - 1]  ; Wait for IRQ 0, then delay to sample point
+    wait 1 irq 0 [SAMPLE_POS_1 - 2] side 0  ; Wait for IRQ 0, then delay (reduced by 1 for sideset)
 
     ; pause the wait-for-highers (optional - currently disabled)
     ;irq set 3 
 
     ; Take two samples of the differential pair to decode Manchester bit
     ; first sample (also store it in x for later)
-    mov x, pins             ; Read both RX pins
+    mov x, pins side 1                      ; Read both RX pins, sideset HIGH during sampling
   PUBLIC sample_2:
-    in x, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 2]  ; Push to FIFO, delay to 2nd sample
+    in x, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 3] side 1  ; Push to FIFO, delay to 2nd sample (reduced by 1 for sideset)
 
     ; second sample (also store it in y for later)
-    mov y, pins             ; Read both RX pins again
-    in y, 2                 ; Push to FIFO (autopush at 32 bits = 8 samples)
+    mov y, pins side 0                      ; Read both RX pins again, sideset LOW after sampling
+    in y, 2 side 0                          ; Push to FIFO (autopush at 32 bits = 8 samples)
 
     ; wait for the inter-bit timer to finish before next bit
-    wait 1 irq 2 [3]
+    wait 1 irq 2 [3] side 0
 .wrap
 
 
@@ -241,7 +241,7 @@ pio_sm_config cs_program_config;     // Configuration for CS program
 //   tx_pin_base: First GPIO for TX (uses tx_pin_base and tx_pin_base+1)
 //   rx_pin_base: First GPIO for RX (uses rx_pin_base and rx_pin_base+1)
 // ============================================================================
-void isospi_master_program_init(PIO pio, uint tx_pin_base, uint rx_pin_base) {
+void isospi_master_program_init(PIO pio, uint sm, uint tx_pin_base, uint rx_pin_base) {
     // ========================================
     // Configure GPIO pins
     // ========================================
@@ -265,7 +265,7 @@ void isospi_master_program_init(PIO pio, uint tx_pin_base, uint rx_pin_base) {
     gpio_set_inover(rx_pin_base + 1, GPIO_OVERRIDE_INVERT);
 
     // Set TX pins as PIO-controlled outputs
-    pio_sm_set_consecutive_pindirs(pio, 0, tx_pin_base, 2, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, tx_pin_base, 2, true);
 
     // ========================================
     // Configure SM0: Main data transmit/receive program
@@ -292,7 +292,15 @@ void isospi_master_program_init(PIO pio, uint tx_pin_base, uint rx_pin_base) {
     // 2 half-bits per bit = 200ns = 5Mbps symbol rate → 1Mbps data rate
     sm_config_set_clkdiv_int_frac8(&master_config, 1, 0);
 
-    pio_sm_init(pio, 0, master_offset, &master_config);
+    // Diagnostic output showing sampling points (for oscilloscope debugging)
+    // Sideset pin goes HIGH during RX sampling, LOW otherwise
+    // Uses GP13 as the debug output pin (GP9-10=RX, GP11-12=snooper debug)
+    uint sampling_pin = 13;
+    pio_gpio_init(pio, sampling_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, sampling_pin, 1, true);
+    sm_config_set_sideset_pins(&master_config, sampling_pin);
+
+    pio_sm_init(pio, sm, master_offset, &master_config);
 
     // ========================================
     // Configure CS (Chip Select) program
@@ -318,7 +326,7 @@ void isospi_master_program_init(PIO pio, uint tx_pin_base, uint rx_pin_base) {
     pio_sm_config c2 = isospi_master_wait_for_high_program_get_default_config(offset);
     sm_config_set_in_pin_base(&c2, rx_pin_base);      // Watch first RX pin
     sm_config_set_in_pin_count(&c2, 1);               // Only need 1 pin
-    pio_sm_init(pio, 1, offset, &c2);
+    pio_sm_init(pio, sm + 1, offset, &c2);
 
     // ========================================
     // Configure SM2: Edge detector for RX pin 1
@@ -330,7 +338,7 @@ void isospi_master_program_init(PIO pio, uint tx_pin_base, uint rx_pin_base) {
     pio_sm_config c3 = isospi_master_wait_for_high_program_get_default_config(offset);
     sm_config_set_in_pin_base(&c3, rx_pin_base + 1);  // Watch second RX pin
     sm_config_set_in_pin_count(&c3, 1);               // Only need 1 pin
-    pio_sm_init(pio, 2, offset, &c3);
+    pio_sm_init(pio, sm + 2, offset, &c3);
 
     // ========================================
     // Configure SM3: Gap/timeout timer
@@ -344,17 +352,17 @@ void isospi_master_program_init(PIO pio, uint tx_pin_base, uint rx_pin_base) {
     pio_sm_config c4 = isospi_master_wait_for_gap_program_get_default_config(offset);
     // Match main SM clock divider for synchronized timing
     sm_config_set_clkdiv_int_frac8(&c4, 1, 0);
-    pio_sm_init(pio, 3, offset, &c4);
+    pio_sm_init(pio, sm + 3, offset, &c4);
 
     // ========================================
     // Enable all state machines
     // ========================================
     // All 4 SMs run concurrently to handle TX, RX, edge detection, and timing
 
-    pio_sm_set_enabled(pio, 0, true);  // Main TX/RX
-    pio_sm_set_enabled(pio, 1, true);  // Edge detector (RX pin 0)
-    pio_sm_set_enabled(pio, 2, true);  // Edge detector (RX pin 1)
-    pio_sm_set_enabled(pio, 3, true);  // Timer
+    pio_sm_set_enabled(pio, sm, true);      // Main TX/RX
+    pio_sm_set_enabled(pio, sm + 1, true);  // Edge detector (RX pin 0)
+    pio_sm_set_enabled(pio, sm + 2, true);  // Edge detector (RX pin 1)
+    pio_sm_set_enabled(pio, sm + 3, true);  // Timer
 }
 
 // ============================================================================
