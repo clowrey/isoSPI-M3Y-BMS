@@ -1,147 +1,282 @@
+// ============================================================================
+// isoSPI Snooper PIO Program
+// ============================================================================
+// This PIO program passively monitors (snoops) isoSPI bus traffic without
+// interfering with communication between master and slave devices.
+// It uses 4 state machines working together:
+//   SM: Main receiver - samples and decodes Manchester-encoded data
+//   SM+1: Edge detector for RX pin 0 (first line of differential pair)
+//   SM+2: Edge detector for RX pin 1 (second line of differential pair)
+//   SM+3: Gap/timeout detector - identifies idle periods between packets
+// ============================================================================
+
 .pio_version 0
 
 .program isosnoop
-.side_set 1
+.side_set 1  // Uses 1 sideset pin for diagnostic output (shows sampling points)
+.set 1       // Uses 1 set pin for edge detection flag (GP12)
+
+; ============================================================================
+; Timing Constants for Sampling
+; ============================================================================
+; All timing based on 150MHz PIO clock (6.67ns per cycle) with no divider
+; isoSPI uses Manchester encoding at 1Mbps with 100ns pulse widths
+; ============================================================================
 
 ; the sampling points - multiplied by 6.7ns
 
 ; CL: Updated sampling positions for better accuracy with 100ns pulses
-.define SAMPLE_POS_1  5  ; 1-12 work (100ns pulses)
-.define SAMPLE_POS_2  20
+.define SAMPLE_POS_1  1  ; First sample at ~33ns (1-12 work for 100ns pulses)
+.define SAMPLE_POS_2  15 ; Second sample at ~133ns
 
+
+; ============================================================================
+; Main Receiver Loop
+; ============================================================================
+; This loop continuously monitors the bus, sampling when edges are detected.
+; Manchester decoding: Takes 2 samples per bit period to determine bit value
+;   - HIGH->LOW transition = logical '1'
+;   - LOW->HIGH transition = logical '0'
+; Uses sideset pin to output diagnostic signal showing when sampling occurs
+; ============================================================================
 
 .wrap_target
 
 recv_wait:
-    ; clear any pending irq
+    ; clear any pending edge detection interrupt
     irq clear 0 side 0
 
-    ; wait for an interrupt from one of the detector state machines (or the timeout)
+    ; wait for an interrupt from edge detectors (SM+1/SM+2) or timeout (SM+3)
+    ; IRQ 0 signals: "activity detected, start sampling"
     wait 1 irq 0 side 0 [SAMPLE_POS_1 - 1]
 
 recv_started:   
-    ; first sample (also store it in x for later)
-    mov x, pins side 1 
-    in x, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 2] side 1
+    ; ========================================
+    ; Take two samples to decode Manchester bit
+    ; ========================================
+    ; Set edge detection flag (GP12) HIGH to signal gap detector
+    set pins, 1 side 1         ; GP12 HIGH = data detected, GP11 HIGH = sampling
+    ; first sample (also store it in x for later comparison)
+    mov x, pins side 1  ; Set diagnostic pin HIGH during sampling
+    in x, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 2] side 1  ; Push 2 bits to FIFO, delay
 
-    ; second sample (also store it in y for later)
-    mov y, pins side 0
-    in y, 2 [8] side 0  ; CL: Reduced delay to sample more frequently
+    ; second sample (also store it in y for later comparison)
+    mov y, pins side 0  ; Set diagnostic pin LOW after first sample
+    in y, 2 side 0      ; Push to FIFO
 
-    jmp x-- received_something side 0
-    jmp y-- received_something side 0
-    ; CL: Even if idle (both 0), restart timer for next sample
-    irq set 1 side 0
+    ; ========================================
+    ; Check if we received real data or just idle
+    ; ========================================
+    ; If x or y is non-zero, we received something
+    jmp x-- received_something side 0  ; x=0 means idle on both pins
+    jmp y-- received_something side 0  ; y=0 means idle on both pins
+    ; Both samples were 0 (idle) - DON'T trigger gap detector again
+    ; Just go back and wait for next IRQ 0 (from edge detectors or gap timeout)
     jmp recv_wait side 0
 
 received_something:
-    ; we received data (this wasn't a gap)
+    ; we received data (this wasn't a gap/idle period)
 
     nop [3] side 0
 
-    ; start the timer
-    irq set 1 side 0
+    ; start the timer for next bit/gap detection
+    ; ONLY set IRQ 1 when we got real data, not idle
+    irq set 1 side 0    ; Signal SM+3 to start timing
 
 .wrap
+
+; ============================================================================
+; Edge Detector Helper Program (SM+1 and SM+2)
+; ============================================================================
+; This program runs on two state machines to detect rising edges on each
+; line of the differential pair. When an edge is detected, it triggers
+; IRQ 0 to signal the main receiver to start sampling.
+; SM+1 watches rx_pin_base (first pin), SM+2 watches rx_pin_base+1 (second pin)
+; ============================================================================
 
 .program isosnoop_wait_for_high
 
 .wrap_target
+    ; Wait for rising edge on the configured input pin
     wait 1 pin 0
-    irq set 0 [10]  ; CL: Reduced delay to catch more transitions
-    wait 0 pin 0 [10]
+    ; Signal main receiver that edge was detected (keep edge detectors fast!)
+    irq set 0 [20]  ; Set IRQ 0 for main receiver
+    ; Wait for falling edge before looking for next rising edge
+    wait 0 pin 0 [12]
 .wrap
+
+; ============================================================================
+; Gap/Timeout Detector Program (SM+3)
+; ============================================================================
+; This program detects idle periods (gaps) between packets on the bus.
+; If no edges are detected for a period of time, it triggers a timeout
+; sample to ensure the main receiver doesn't miss idle states.
+; Works with IRQ 1 (set by main receiver when activity detected).
+; ============================================================================
 
 .program isosnoop_wait_for_gap
+; No sideset needed - gap detector will read GP12 as input and write to clear it
 
 .wrap_target
-    ; wait to be woken up
-    wait 1 irq 1 [8]  ; CL: Short delay to catch idle periods
-    irq clear 1       ; CL: Clear the trigger
-    ; trigger next sample quickly to catch idle gaps
-    irq set 0 [8]
+    ; Wait to be triggered by main receiver (IRQ 1 set after each sample)
+    wait 1 irq 1        ; Wait for main receiver to signal
+    irq clear 1         ; Clear IRQ 1 to start fresh
+    ; Clear GP12 edge detection flag at START of timer
+    set pins, 0         ; GP12 = LOW (no edge detected yet)
+    ; Set up counter for timeout (~600ns = ~90 cycles at 150MHz)
+    set x, 3            ; Use X as loop counter (3 iterations)
+timer_loop:
+    nop [14]            ; 15 cycles per iteration
+    jmp x-- timer_loop  ; 1 cycle (total 16 cycles per iteration)
+    ; Timer expired - check GP12 (edge detection flag from main receiver)
+    mov x, pins         ; Read GPIO pins (bit 0 = GP12 state)
+    jmp x-- skip_trigger ; If GP12 is HIGH (x non-zero after decrement), skip trigger
+    ; GP12 is LOW - no edge detected during timer, trigger gap sample
+    irq set 0           ; Set IRQ 0 to wake main receiver for gap sample
+skip_trigger:
+    nop                 ; Nop to give skip_trigger a valid target
 .wrap
-
 
 
 % c-sdk {
-// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+// ============================================================================
+// C SDK Initialization Function for isoSPI Snooper
+// ============================================================================
+// Configures 4 state machines to passively monitor isoSPI bus traffic:
+//   SM:   Main receiver - samples and decodes data
+//   SM+1: Edge detector for RX pin 0
+//   SM+2: Edge detector for RX pin 1  
+//   SM+3: Gap/timeout detector
+// ============================================================================
 
+#include <stdio.h>
+
+// ============================================================================
+// Initialize the isoSPI Snooper
+// ============================================================================
+// Parameters:
+//   pio: PIO block to use (PIO0 or PIO1)
+//   sm: Base state machine number (uses sm, sm+1, sm+2, sm+3)
+//   offset: Memory offset where main program is loaded
+//   rx_pin_base: First GPIO for RX (uses rx_pin_base and rx_pin_base+1)
+//   invert: 1 to invert RX pins (for direct connection), 0 for non-inverted
+//   sampling_pin: GPIO for diagnostic output (shows when main receiver samples)
+// NOTE: Gap detector uses sampling_pin + 1 for its diagnostic output
+// ============================================================================
 void isosnoop_pio_setup(PIO pio, uint sm, uint offset, uint rx_pin_base, int invert, uint sampling_pin) {
-    // we don't need to init GPIOs as inputs
+    // ========================================
+    // Configure GPIO pins
+    // ========================================
+    // RX inputs: differential pair for passive monitoring
+    // We don't need PIO to own these, just read them
 
     gpio_init(rx_pin_base);
     gpio_set_dir(rx_pin_base, GPIO_IN);
-    gpio_pull_up(rx_pin_base);
+    gpio_pull_up(rx_pin_base);        // Pull-up for idle state
 
     gpio_init(rx_pin_base + 1);
     gpio_set_dir(rx_pin_base + 1, GPIO_IN);
-    gpio_pull_up(rx_pin_base + 1);
+    gpio_pull_up(rx_pin_base + 1);    // Pull-up for idle state
 
 
     if(invert) {
-        // invert both RX pins
+        // Invert both RX pins if needed (depends on connection type)
+        // Use this when directly connected to isoSPI lines
         gpio_set_inover(rx_pin_base, GPIO_OVERRIDE_INVERT);
         gpio_set_inover(rx_pin_base + 1, GPIO_OVERRIDE_INVERT);
     }
 
-    // SM: Main receiver
+    // ========================================
+    // Configure SM: Main receiver
+    // ========================================
     pio_sm_config c = isosnoop_program_get_default_config(offset);
 
     // Shift to right, autopush with threshold 8
+    // Collects 8 bits (4 samples of 2 bits each) before pushing to FIFO
     sm_config_set_in_shift(&c, false, true, 8);
     sm_config_set_in_pin_base(&c, rx_pin_base);
-    sm_config_set_in_pin_count(&c, 2); // rx_pin_base and rx_pin_base+1
+    sm_config_set_in_pin_count(&c, 2);  // Read both rx_pin_base and rx_pin_base+1
 
+    // Join FIFOs for maximum RX buffer (8-deep instead of 4-deep)
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
-    // diagnostic output showing sampling points
+    // Diagnostic output showing sampling points (for oscilloscope debugging)
+    // Sideset pin goes HIGH during sampling, LOW otherwise
     pio_gpio_init(pio, sampling_pin);
     pio_sm_set_consecutive_pindirs(pio, sm, sampling_pin, 1, true);
     sm_config_set_sideset_pins(&c, sampling_pin);
 
-    // No clock divider for best accuracy
+    // Configure GP12 (sampling_pin + 1) as SET pin for edge detection flag
+    uint edge_flag_pin = sampling_pin + 1;
+    pio_gpio_init(pio, edge_flag_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, edge_flag_pin, 1, true);
+    sm_config_set_set_pins(&c, edge_flag_pin, 1);  // 1 set pin starting at edge_flag_pin
+
+    // No clock divider for best accuracy (150MHz = 6.67ns resolution)
     sm_config_set_clkdiv_int_frac8(&c, 1, 0);
 
     pio_sm_init(pio, sm, offset, &c);
 
-    ////
+    // ========================================
+    // Configure SM+1: Edge detector for RX pin 0
+    // ========================================
+    // Watches the first RX pin for rising edges and triggers IRQ 0
+    // when activity is detected
 
-    // SM+1: Wait for high on first pin (rx_pin_base)
     uint offset_high = pio_add_program(pio, &isosnoop_wait_for_high_program);
     pio_sm_config c2 = isosnoop_wait_for_high_program_get_default_config(offset_high);
-    sm_config_set_in_pin_base(&c2, rx_pin_base);
-    sm_config_set_in_pin_count(&c2, 1);  // Only watch first pin
-    sm_config_set_clkdiv_int_frac8(&c2, 1, 0);
+    sm_config_set_in_pin_base(&c2, rx_pin_base);    // Watch first RX pin
+    sm_config_set_in_pin_count(&c2, 1);             // Only need 1 pin
+    sm_config_set_clkdiv_int_frac8(&c2, 1, 0);      // No divider for fast response
 
     pio_sm_init(pio, sm + 1, offset_high, &c2);
 
-    ////
+    // ========================================
+    // Configure SM+2: Edge detector for RX pin 1
+    // ========================================
+    // Watches the second RX pin for rising edges (uses same program as SM+1)
+    // Having two edge detectors ensures we catch transitions on either line
+    // of the differential pair
 
-    // SM+2: Wait for high on second pin (rx_pin_base + 1) - uses same program
     pio_sm_config c3 = isosnoop_wait_for_high_program_get_default_config(offset_high);
-    sm_config_set_in_pin_base(&c3, rx_pin_base + 1);
-    sm_config_set_in_pin_count(&c3, 1);  // Only watch second pin
-    sm_config_set_clkdiv_int_frac8(&c3, 1, 0);
+    sm_config_set_in_pin_base(&c3, rx_pin_base + 1);  // Watch second RX pin
+    sm_config_set_in_pin_count(&c3, 1);               // Only need 1 pin
+    sm_config_set_clkdiv_int_frac8(&c3, 1, 0);        // No divider for fast response
 
     pio_sm_init(pio, sm + 2, offset_high, &c3);
 
-    ////
+    // ========================================
+    // Configure SM+3: Gap/timeout detector
+    // ========================================
+    // Provides timeout functionality to detect idle periods between packets
+    // Clears GP12 at start, reads GP12 at end to check if data was detected during timeout
 
-    // SM+3: Gap/timeout detector
     uint offset_gap = pio_add_program(pio, &isosnoop_wait_for_gap_program);
     pio_sm_config c4 = isosnoop_wait_for_gap_program_get_default_config(offset_gap);
-    sm_config_set_clkdiv_int_frac8(&c4, 1, 0);
+    sm_config_set_clkdiv_int_frac8(&c4, 1, 0);        // No divider for accurate timing
+
+    // Configure to read GP12 as input (edge detection flag from main receiver)
+    sm_config_set_in_pin_base(&c4, edge_flag_pin);
+    sm_config_set_in_pin_count(&c4, 1);               // Read 1 pin (GP12)
+    
+    // Also configure GP12 as SET pin so gap detector can clear it at start of timer
+    sm_config_set_set_pins(&c4, edge_flag_pin, 1);    // SET pin = GP12
 
     pio_sm_init(pio, sm + 3, offset_gap, &c4);
 
-    ////
-
+    // ========================================
     // Enable all 4 state machines
-    pio_sm_set_enabled(pio, sm, true);
-    pio_sm_set_enabled(pio, sm + 1, true);
-    pio_sm_set_enabled(pio, sm + 2, true);
-    pio_sm_set_enabled(pio, sm + 3, true);
+    // ========================================
+    // All SMs run concurrently to monitor the bus in real-time
+
+    pio_sm_set_enabled(pio, sm, true);      // Main receiver
+    pio_sm_set_enabled(pio, sm + 1, true);  // Edge detector (RX pin 0)
+    pio_sm_set_enabled(pio, sm + 2, true);  // Edge detector (RX pin 1)
+    pio_sm_set_enabled(pio, sm + 3, true);  // Gap/timeout detector
+
+    // Kick-start the gap detector by setting IRQ 1 using exec
+    // Force SM+3 to execute "irq set 1" to trigger itself
+    pio_sm_exec(pio, sm, pio_encode_irq_set(false, 1));  // Main receiver sets IRQ 1
 }
 
 %}

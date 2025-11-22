@@ -1,3 +1,15 @@
+// ============================================================================
+// isoSPI Master PIO Program
+// ============================================================================
+// This PIO program implements a differential Manchester-encoded isoSPI master
+// interface for communicating with LTC6804/LTC6811 Battery Management ICs.
+// It uses 4 state machines working in coordination:
+//   SM0: Main transmitter/receiver (switches between data and CS programs)
+//   SM1: Edge detector for RX pin 0
+//   SM2: Edge detector for RX pin 1
+//   SM3: Gap/timeout timer
+// ============================================================================
+
 .pio_version 0 // only requires PIO version 0
 
 ; Patterns when testing
@@ -6,234 +18,365 @@
 ;.define TX_IDLE 0b00
 
 ; Actual patterns when using a driver
+; These 2-bit patterns control the differential pair (IP/IM pins):
+; TX_HIGH (0b11): Both pins high - represents high part of differential signal
+; TX_LOW  (0b10): IP high, IM low - represents low part of differential signal
+; TX_IDLE (0b00): Both pins low - idle state when not transmitting
 .define PUBLIC TX_HIGH 0b11
 .define PUBLIC TX_LOW  0b10
 .define PUBLIC TX_IDLE 0b00
 
-; length of half-bit pulses (multipled by 6.7ns)
+; ============================================================================
+; Timing Constants
+; ============================================================================
+; All timing is based on 150MHz PIO clock (6.67ns per cycle) with no divider
+; isoSPI uses differential Manchester encoding at 1Mbps (1us per bit)
+; Each bit is composed of two 500ns half-periods (100ns pulse + 400ns idle)
+; ============================================================================
 
-.define CS_PULSE_LEN_A   30
-.define CS_PULSE_LEN_B   14
-.define DATA_PULSE_LEN   15
+; length of half-bit pulses (multiplied by 6.67ns @ 150MHz, no clock divider)
+; Chip Select (CS) timing per LTC6804 datasheet:
+.define CS_PULSE_LEN_A   30  ; 30 * 6.67ns = 200ns (first pulse width)
+.define CS_PULSE_LEN_B   14  ; 14 * 6.67ns = 93ns  (second pulse width)
+; Data bit timing - each half-bit is a 100ns pulse:
+.define DATA_PULSE_LEN   15  ; 15 * 6.67ns = 100ns (pulse width per half-bit)
 
-; the reply sampling points (multiplied by 6.7ns)
-
-.define SAMPLE_POS_1  10   ; 5 - 16 works
-.define SAMPLE_POS_2  25
+; the reply sampling points (multiplied by 6.67ns @ 150MHz)
+; These define when to sample the incoming RX signals during reception
+.define SAMPLE_POS_1  10   ; First sample at 67ns into bit period (5-16 works)
+.define SAMPLE_POS_2  25   ; Second sample at 167ns into bit period
 
 ; how long to wait for the reply (multiplied by 20ns)
+; (Timer is managed by wait_for_gap state machine)
 
 
 
+
+; ============================================================================
+; Main isoSPI Master Program
+; ============================================================================
+; This program handles both TX and RX for each bit using Manchester encoding:
+;   Logical '1': HIGH pulse (100ns) followed by LOW pulse (100ns)
+;   Logical '0': LOW pulse (100ns) followed by HIGH pulse (100ns)
+; After transmitting, it samples the reply from the slave device.
+; Uses autopull (threshold=8) for TX and autopush (threshold=32) for RX.
+; ============================================================================
 
 .program isospi_master
 .wrap_target
 
 do_bit:
 
-    ; read a bit
+    ; read a bit from the TX FIFO into X register
     out x, 1
 
+    ; jump based on bit value (x=0 goes to zero_bit, x=1 continues)
     jmp !x zero_bit
 
-    ; output a 1
+    ; ========================================
+    ; Transmit a logical '1': HIGH then LOW
+    ; ========================================
   PUBLIC data_high_1:
-    set pins, TX_HIGH [DATA_PULSE_LEN-1]
+    set pins, TX_HIGH [DATA_PULSE_LEN-1]  ; 100ns HIGH pulse
   PUBLIC data_low_1:
-    set pins, TX_LOW  [DATA_PULSE_LEN-1]
+    set pins, TX_LOW  [DATA_PULSE_LEN-1]  ; 100ns LOW pulse
     jmp done
 
     ; cheeky void space
 
 zero_bit:
-    ; output a 0
+    ; ========================================
+    ; Transmit a logical '0': LOW then HIGH
+    ; ========================================
   PUBLIC data_low_2:
-    set pins, TX_LOW  [DATA_PULSE_LEN-1]
+    set pins, TX_LOW  [DATA_PULSE_LEN-1]  ; 100ns LOW pulse
   PUBLIC data_high_2:
-    set pins, TX_HIGH [DATA_PULSE_LEN-1]
+    set pins, TX_HIGH [DATA_PULSE_LEN-1]  ; 100ns HIGH pulse
 
 done:
-    ; go idle and wait for the lines to settle
+    ; ========================================
+    ; Receive Phase - Sample incoming reply
+    ; ========================================
+    ; After transmitting, switch to idle and prepare to receive response
   PUBLIC pre_rx:
-    set pins, TX_IDLE [15] ; min 10?, too long and we miss the reply
+    set pins, TX_IDLE [19] ; Go idle, wait for lines to settle (min 10 cycles)
+                           ; Balance: too long and we miss reply, too short and we sample noise
 
-    ; start the timer
+    ; Coordinate with helper state machines using IRQ flags:
+    ; IRQ 0: Edge detection trigger (set by SM1/SM2 when edge detected)
+    ; IRQ 1: Timer start trigger (set here, used by SM3)
+    ; IRQ 2: Timer done signal (set by SM3 after timeout)
+    ; IRQ 3: Edge detector gate (cleared=active, set=paused)
+
+    ; start the timer (SM3 will wait for this)
     irq set 1
 
-    ; clear any pending irq
+    ; clear any pending edge detection irq
     irq clear 0
 
-    ; wake up the wait-for-highers
+    ; wake up the edge detectors (SM1 and SM2)
     irq clear 3
 
-    ; wait for a bit to start
+    ; wait for an edge to be detected (or timeout from SM3)
   PUBLIC sample_1:
-    wait 1 irq 0 [SAMPLE_POS_1 - 1]
+    wait 1 irq 0 [SAMPLE_POS_1 - 1]  ; Wait for IRQ 0, then delay to sample point
 
-    ; pause the wait-for-highers
+    ; pause the wait-for-highers (optional - currently disabled)
     ;irq set 3 
 
+    ; Take two samples of the differential pair to decode Manchester bit
     ; first sample (also store it in x for later)
-    mov x, pins
+    mov x, pins             ; Read both RX pins
   PUBLIC sample_2:
-    in x, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 2]
+    in x, 2 [SAMPLE_POS_2 - SAMPLE_POS_1 - 2]  ; Push to FIFO, delay to 2nd sample
 
     ; second sample (also store it in y for later)
-    mov y, pins
-    in y, 2
+    mov y, pins             ; Read both RX pins again
+    in y, 2                 ; Push to FIFO (autopush at 32 bits = 8 samples)
 
-    ; wait for the timer to finish
+    ; wait for the inter-bit timer to finish before next bit
     wait 1 irq 2 [3]
 .wrap
 
 
+; ============================================================================
+; Chip Select (CS) Program
+; ============================================================================
+; This program temporarily replaces the main program in SM0 to send a CS pulse.
+; The CS pulse tells the slave devices to prepare for a new transaction.
+; Per LTC6804 spec, CS uses a specific pulse pattern different from data bits.
+; Two patterns: CS_HIGH (transaction start) or CS_LOW (transaction end)
+; ============================================================================
+
 .program isospi_master_cs
 .wrap_target
 
+    ; Pull 4 bits: 2 bits for first state (x), 2 bits for second state (y)
     out x, 2
     out y, 2
 
-    ; do the chip select pattern
+    ; Generate the chip select pulse pattern with specific timing
+    ; CS waveform: two pulses of different lengths (200ns + 93ns each)
   PUBLIC cs_high_1:
-    mov pins x  [CS_PULSE_LEN_A-1]
-    mov pins x  [CS_PULSE_LEN_B-1]
+    mov pins x  [CS_PULSE_LEN_A-1]  ; First pulse (200ns)
+    mov pins x  [CS_PULSE_LEN_B-1]  ; Second pulse (93ns)
   PUBLIC cs_low_1:
-    mov pins y  [CS_PULSE_LEN_A-1]
-    mov pins y  [CS_PULSE_LEN_B-1]
-    set pins TX_IDLE [31]
+    mov pins y  [CS_PULSE_LEN_A-1]  ; First pulse (200ns)
+    mov pins y  [CS_PULSE_LEN_B-1]  ; Second pulse (93ns)
+    set pins TX_IDLE [31]           ; Return to idle, wait for program swap
 .wrap
 
 
+; ============================================================================
+; Edge Detector Helper Program (SM1 and SM2)
+; ============================================================================
+; This program runs on SM1 and SM2 to detect rising edges on the RX pins.
+; When an edge is detected, it triggers IRQ 0 to tell SM0 to start sampling.
+; IRQ 3 is used as a gate: when cleared, detector is active; when set, paused.
+; SM1 watches rx_pin_base (first pin), SM2 watches rx_pin_base+1 (second pin)
+; ============================================================================
+
 .program isospi_master_wait_for_high
 .wrap_target
-    ; wait to be woken up (irq 3 gets cleared)
+    ; wait to be woken up (irq 3 gets cleared by SM0 when ready to receive)
     irq wait 3
 
+    ; Wait for rising edge on the configured input pin
     wait 1 pin 0
+    ; Signal SM0 that an edge was detected (start sampling)
     irq set 0  ; [3]
+    ; Wait for falling edge before detecting next rising edge
     wait 0 pin 0
 .wrap
 
 
+; ============================================================================
+; Gap/Timeout Timer Program (SM3)
+; ============================================================================
+; This program runs on SM3 to provide timing control between bits.
+; It manages two functions:
+;   1. Timeout detection: If no edge detected, force a sample anyway
+;   2. Inter-bit timing: Signal when it's safe to transmit next bit
+; Runs at same clock speed as SM0 for synchronized timing.
+; ============================================================================
+
 .program isospi_master_wait_for_gap
 .wrap_target
-    ; wait to be woken up
-    wait 1 irq 1 [30]
-    ; after a while, trigger the receiver
-    irq set 0 [31]
-    nop [31]
-    ; then trigger the next send
+    ; wait to be woken up (SM0 sets IRQ 1 when starting receive phase)
+    wait 1 irq 1 [31]
+    ; after a delay, trigger the receiver (timeout if no edge detected by SM1/SM2)
+    irq set 0 [31]        ; Set IRQ 0 to force SM0 to sample even without edge
+    nop [31]              ; Additional delay
+    ; then trigger the next send (signal SM0 that inter-bit gap is complete)
     irq set 2
 .wrap
 
 
 % c-sdk {
-// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+// ============================================================================
+// C SDK Initialization Functions
+// ============================================================================
+// These functions configure the hardware and PIO state machines for isoSPI.
+// The system uses 4 state machines in coordination:
+//   SM0: Main TX/RX (switches between data and CS programs)
+//   SM1: Edge detector for RX pin 0
+//   SM2: Edge detector for RX pin 1
+//   SM3: Gap/timeout timer
+// ============================================================================
 
 #include "pico/stdlib.h"
 
-PIO master_pio;
-uint32_t master_offset;
-pio_sm_config master_config;
-uint32_t cs_program_offset;
-pio_sm_config cs_program_config;
+// Global variables to store program configurations for dynamic program swapping
+PIO master_pio;                      // Which PIO block we're using (PIO0 or PIO1)
+uint32_t master_offset;              // Memory offset of main data program
+pio_sm_config master_config;         // Configuration for main data program
+uint32_t cs_program_offset;          // Memory offset of CS program
+pio_sm_config cs_program_config;     // Configuration for CS program
 
+// ============================================================================
+// Initialize the isoSPI Master Interface
+// ============================================================================
+// Parameters:
+//   pio: PIO block to use (PIO0 or PIO1)
+//   tx_pin_base: First GPIO for TX (uses tx_pin_base and tx_pin_base+1)
+//   rx_pin_base: First GPIO for RX (uses rx_pin_base and rx_pin_base+1)
+// ============================================================================
 void isospi_master_program_init(PIO pio, uint tx_pin_base, uint rx_pin_base) {
-    // Outputs
+    // ========================================
+    // Configure GPIO pins
+    // ========================================
+    
+    // TX outputs: differential pair for isoSPI transmission
     pio_gpio_init(pio, tx_pin_base);
     pio_gpio_init(pio, tx_pin_base + 1);
 
-    // Inputs (we don't need the pio to own these)
+    // RX inputs: differential pair for isoSPI reception
+    // (we don't need the pio to own these, just read them)
     gpio_init(rx_pin_base);
     gpio_set_dir(rx_pin_base, GPIO_IN);
-    gpio_pull_up(rx_pin_base);
+    gpio_pull_up(rx_pin_base);        // Pull-up for idle state
 
     gpio_init(rx_pin_base + 1);
     gpio_set_dir(rx_pin_base + 1, GPIO_IN);
-    gpio_pull_up(rx_pin_base + 1);
+    gpio_pull_up(rx_pin_base + 1);    // Pull-up for idle state
 
-    // invert both RX pins
+    // Invert both RX pins (isoSPI uses inverted logic)
     gpio_set_inover(rx_pin_base, GPIO_OVERRIDE_INVERT);
     gpio_set_inover(rx_pin_base + 1, GPIO_OVERRIDE_INVERT);
 
-    // Set outputs as PIO outputs
+    // Set TX pins as PIO-controlled outputs
     pio_sm_set_consecutive_pindirs(pio, 0, tx_pin_base, 2, true);
 
-    //////
+    // ========================================
+    // Configure SM0: Main data transmit/receive program
+    // ========================================
     
     master_pio = pio;
     master_offset = pio_add_program(pio, &isospi_master_program);
     master_config = isospi_master_program_get_default_config(master_offset);
 
-    // Shift to right, autopull with threshold 8
+    // TX configuration: Shift to right, autopull with threshold 8
+    // Each byte from FIFO becomes 8 bits to transmit
     sm_config_set_out_shift(&master_config, false, true, 8);
-    sm_config_set_set_pins(&master_config, tx_pin_base, 2);
+    sm_config_set_set_pins(&master_config, tx_pin_base, 2);  // Control 2 TX pins
 
-    // Shift to right, autopush with threshold 32
+    // RX configuration: Shift to right, autopush with threshold 32
+    // Collects 32 bits (8 samples of 4 bits each) before pushing to FIFO
     sm_config_set_in_shift(&master_config, false, true, 32);
     sm_config_set_in_pin_base(&master_config, rx_pin_base);
-    sm_config_set_in_pin_count(&master_config, 2);
+    sm_config_set_in_pin_count(&master_config, 2);  // Read 2 RX pins
 
-    // Clock divider to achieve 1MHz isoSPI rate (1µs per bit)
-    // 1.333 divider: int=1, frac=85 (85/256 ≈ 0.332)
-    sm_config_set_clkdiv_int_frac8(&master_config, 1, 85);
+    // Clock divider for 100ns pulses (1MHz isoSPI data rate)
+    // No division: 150MHz / 1.0 = 150MHz = 6.67ns per cycle
+    // DATA_PULSE_LEN=15 * 6.67ns = 100ns per half-bit
+    // 2 half-bits per bit = 200ns = 5Mbps symbol rate → 1Mbps data rate
+    sm_config_set_clkdiv_int_frac8(&master_config, 1, 0);
 
     pio_sm_init(pio, 0, master_offset, &master_config);
 
-    //////
-
-    // setup CS program/config but don't load it
+    // ========================================
+    // Configure CS (Chip Select) program
+    // ========================================
+    // This program is loaded into PIO memory but not initialized in SM0 yet.
+    // It will be dynamically swapped into SM0 when CS pulses are needed.
 
     cs_program_offset = pio_add_program(pio, &isospi_master_cs_program);
     cs_program_config = isospi_master_cs_program_get_default_config(cs_program_offset);
 
-    // Shift to right, autopull with threshold 4
+    // Shift to right, autopull with threshold 4 (pulls 4 bits for CS pattern)
     sm_config_set_out_shift(&cs_program_config, false, true, 4);
-    sm_config_set_out_pins(&cs_program_config, tx_pin_base, 2);
-    sm_config_set_set_pins(&cs_program_config, tx_pin_base, 2);
+    sm_config_set_out_pins(&cs_program_config, tx_pin_base, 2);  // Control 2 TX pins
+    sm_config_set_set_pins(&cs_program_config, tx_pin_base, 2);  // Also use set for idle
 
-    //////
+    // ========================================
+    // Configure SM1: Edge detector for RX pin 0
+    // ========================================
+    // This SM watches the first RX pin for rising edges and triggers IRQ 0
+    // when an edge is detected, signaling SM0 to start sampling.
 
     uint32_t offset = pio_add_program(pio, &isospi_master_wait_for_high_program);
     pio_sm_config c2 = isospi_master_wait_for_high_program_get_default_config(offset);
-    sm_config_set_in_pin_base(&c2, rx_pin_base);
-    sm_config_set_in_pin_count(&c2, 1);
+    sm_config_set_in_pin_base(&c2, rx_pin_base);      // Watch first RX pin
+    sm_config_set_in_pin_count(&c2, 1);               // Only need 1 pin
     pio_sm_init(pio, 1, offset, &c2);
 
-    //////
+    // ========================================
+    // Configure SM2: Edge detector for RX pin 1
+    // ========================================
+    // This SM watches the second RX pin for rising edges (same program as SM1).
+    // Having two edge detectors allows us to catch transitions on either line
+    // of the differential pair.
 
     pio_sm_config c3 = isospi_master_wait_for_high_program_get_default_config(offset);
-    sm_config_set_in_pin_base(&c3, rx_pin_base + 1);
-    sm_config_set_in_pin_count(&c3, 1);
+    sm_config_set_in_pin_base(&c3, rx_pin_base + 1);  // Watch second RX pin
+    sm_config_set_in_pin_count(&c3, 1);               // Only need 1 pin
     pio_sm_init(pio, 2, offset, &c3);
 
-    //////
+    // ========================================
+    // Configure SM3: Gap/timeout timer
+    // ========================================
+    // This SM provides timing control:
+    //   1. Detects when no edges occur (timeout)
+    //   2. Controls inter-bit gap timing
+    // Must run at same clock speed as SM0 for proper synchronization.
 
     offset = pio_add_program(pio, &isospi_master_wait_for_gap_program);
     pio_sm_config c4 = isospi_master_wait_for_gap_program_get_default_config(offset);
-    // Match main SM clock divider for synchronized 1MHz timing
-    sm_config_set_clkdiv_int_frac8(&c4, 1, 85);
+    // Match main SM clock divider for synchronized timing
+    sm_config_set_clkdiv_int_frac8(&c4, 1, 0);
     pio_sm_init(pio, 3, offset, &c4);
 
-    //////
+    // ========================================
+    // Enable all state machines
+    // ========================================
+    // All 4 SMs run concurrently to handle TX, RX, edge detection, and timing
 
-    pio_sm_set_enabled(pio, 0, true);
-    pio_sm_set_enabled(pio, 1, true);
-    pio_sm_set_enabled(pio, 2, true);
-    pio_sm_set_enabled(pio, 3, true);
+    pio_sm_set_enabled(pio, 0, true);  // Main TX/RX
+    pio_sm_set_enabled(pio, 1, true);  // Edge detector (RX pin 0)
+    pio_sm_set_enabled(pio, 2, true);  // Edge detector (RX pin 1)
+    pio_sm_set_enabled(pio, 3, true);  // Timer
 }
 
+// ============================================================================
+// Send a Chip Select (CS) Pulse
+// ============================================================================
+// This function temporarily replaces the main program in SM0 with the CS
+// program to send a CS pulse, then restores the main program.
+// Parameters:
+//   start: true for CS_HIGH (transaction start), false for CS_LOW (end)
+// ============================================================================
 void isospi_master_cs(bool start) {
-  // Load the CS program into sm0 and start it
+  // Temporarily load the CS program into SM0 and start it
   pio_sm_init(master_pio, 0, cs_program_offset, &cs_program_config);
   pio_sm_set_enabled(master_pio, 0, true);
 
-  // Send a CS
+  // Send CS pattern: 0b1110 for CS_HIGH (start), 0b1011 for CS_LOW (end)
+  // Pattern is shifted to bits 31-28 (autopull threshold is 4 bits)
   pio_sm_put_blocking(master_pio, 0, (start ? 0b1110 : 0b1011) << 28);
 
-  sleep_us(1);
+  sleep_us(1);  // Wait for CS pulse to complete
 
-  // Load the master program back into sm0
+  // Restore the main data program back into SM0
   pio_sm_init(master_pio, 0, master_offset, &master_config);
   pio_sm_set_enabled(master_pio, 0, true);
 }

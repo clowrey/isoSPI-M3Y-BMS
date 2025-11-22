@@ -19,10 +19,10 @@
 #define CMD_READ_E      0x4B
 #define CMD_READ_F      0x4C
 
-// Use PIO1 SM1-4 (PIO0=CAN, PIO1=snooper uses 4 SMs, PIO2=isoSPI master)
-// SM1: Main receiver, SM2: high detector, SM3: low detector, SM4: gap detector
+// Use PIO1 SM0-3 (PIO0=CAN, PIO1=snooper uses 4 SMs, PIO2=isoSPI master)
+// SM0: Main receiver, SM1: high detector, SM2: low detector, SM3: gap detector
 #define ISOSNOOP_MASTER_PIO pio1
-#define ISOSNOOP_MASTER_SM 1
+#define ISOSNOOP_MASTER_SM 0
 
 #define PIO_IRQ_TO_USE 0
 #define DMA_IRQ_TO_USE 0
@@ -44,8 +44,8 @@ void isosnoop_setup(uint rx_pin_base, int invert, uint sampling_pin) {
     dma_chan = dma_channel_hw_addr(dma_channel_rx);
     last_write_addr = dma_chan->write_addr;
     
-    printf("isoSPI Snooper: Advanced multi-SM on PIO1 SM1-4 (RX: GP%d-GP%d, invert=%d, sampling: GP%d)\n", 
-           rx_pin_base, rx_pin_base + 1, invert, sampling_pin);
+    printf("isoSPI Snooper: Advanced multi-SM on PIO1 SM0-3 (RX: GP%d-GP%d, invert=%d, sampling: GP%d, edge flag: GP%d)\n", 
+           rx_pin_base, rx_pin_base + 1, invert, sampling_pin, sampling_pin + 1);
     printf("  SM%d: Main receiver, SM%d: High detect, SM%d: Low detect, SM%d: Gap detect\n",
            ISOSNOOP_MASTER_SM, ISOSNOOP_MASTER_SM + 1, ISOSNOOP_MASTER_SM + 2, ISOSNOOP_MASTER_SM + 3);
 }
