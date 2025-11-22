@@ -99,6 +99,8 @@ bool isospi_write_read_blocking(unsigned char* out_buf, unsigned char* in_buf, s
     sleep_us(3);  // CL: CS front porch - Batman IC needs ~5µs after CS before data
 
     bool valid = true;
+    int carry_bit = 0;
+
     for(size_t i=0; i<len; i++) {
         // We write 8 bits at a time
         pio_sm_put_blocking(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM, out_buf[i] << 24);
@@ -106,10 +108,10 @@ bool isospi_write_read_blocking(unsigned char* out_buf, unsigned char* in_buf, s
         // Each response bit is encoded as a nibble in a 32 bit word
         uint32_t v = pio_sm_get_blocking(ISOSPI_MASTER_PIO, ISOSPI_MASTER_SM);
         
-        // Process nibbles from LSB to MSB
+        // CL: Process nibbles MSB-first (matching snooper's byte-endian approach)
         for(int r=0; r<8; r++) {
-            uint8_t nibble = v & 0xf;
-            v >>= 4;
+            uint8_t nibble = (v >> 28) & 0xf;
+            v <<= 4;
             if(nibble==0b1001) {
                 // bit 1
                 in_buf[i] = (in_buf[i] << 1) | 0x1;
@@ -122,18 +124,18 @@ bool isospi_write_read_blocking(unsigned char* out_buf, unsigned char* in_buf, s
                 in_buf[i] = (in_buf[i] << 1) | 0x0;
             }
         }
-        
-        // Don't swap nibbles - bytes are correct as-is
-        
+
+        // CL: Implement 1-bit carry to align data correctly (off-by-one fix)
+        int new_carry = in_buf[i] & 0x1;
+        in_buf[i] = (in_buf[i] >> 1) | (carry_bit << 7);
+        carry_bit = new_carry;
+
         // CL: Debug - print decoded byte for first few bytes
         if(i < 24) {
             printf("  decoded: 0x%02X\n", in_buf[i]);
         }
-        
-        // CL: 2.5µs inter-byte gap (except after last byte)
-        //if(i < len - 1) {
-        //    sleep_us(3);  // ~2.5µs gap between bytes for Batman IC processing
-        //}
+
+        sleep_us(1);
     }
 
     // perform final ending chip select immediately after data
