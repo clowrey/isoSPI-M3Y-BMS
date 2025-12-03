@@ -3,7 +3,9 @@
 This project provides a comprehensive interface for the Tesla Model 3 Battery Management System (BMS), featuring RP2350A microcontroller with advanced monitoring, CAN bus integration, and ESPHome touchscreen display.
 
 - **Batman BMS code** originally created by Damien and Tom: https://github.com/damienmaguire/Tesla-M3-Bms-Software
-- **Pico PIO Code for isoSPI** plus all the isoSPI logic created by jonny5532
+- **Pico PIO Code for isoSPI** plus all the isoSPI logic created by jonny5532 https://github.com/jonny5532/isosnooper
+- **Board:** WeAct Studio RP2350B Core board
+- **Hardware PCB Design:** https://github.com/clowrey/isoSPI-M3Y-BMS-PCB
 
 ## Project Overview
 
@@ -69,12 +71,14 @@ Balance Status: OFF
 ## Hardware Requirements
 
 ### For RP2350A Implementation
-- **MCU:** RP2350A (custom board)
+- **MCU:** RP2350A (WeAct Studio RP2350B Core custom board)
+- **PCB Design:** Custom PCB available at https://github.com/clowrey/isoSPI-M3Y-BMS-PCB
 - **Current Sensor:** Texas Instruments INA228 (I2C, 25.296µΩ shunt)
 - **Pack Voltage Sensing:** Internal 12-bit ADC with voltage dividers (400V → 3.0V)
 - **BMS Interface:** Tesla Model 3 Battery Management Boards (SPI/isoSPI)
 - **CAN Transceiver:** MCP2551, TJA1050, or similar (for CAN bus)
 - **Display Interface:** UART connection to ESPHome display
+- **Oscilloscope:** Recommended for isoSPI signal debugging and RX sampling optimization
 
 ### For ESPHome Display Interface
 - **ESP32-S3 Development Board** with PSRAM (16MB flash)
@@ -123,11 +127,18 @@ isoSPI-M3Y-BMS/
 │   ├── external_components/       # Custom components
 │   │   └── tesla_bms_uart/        # BMS UART parser component
 │   └── README.md                  # ESPHome setup guide
-├── context/                       # Original Arduino reference code
-├── PARAMETER_API.md               # Complete parameter API documentation
-├── CAN_INTEGRATION_REPORT.md      # CAN bus integration details
-├── CAN_MESSAGE_FORMAT.md          # CAN message specifications
-└── README_RP2350.md               # Additional RP2350A documentation
+├── tests/                        # Automated test framework
+│   ├── test_framework.py         # Core test framework
+│   ├── test_parameter_api.py     # Parameter API tests
+│   ├── test_balance_control.py   # Balance control tests
+│   ├── test_bms_hardware.py      # Hardware interface tests
+│   └── diagnose_balancing.py     # Balance diagnostic tool
+├── context/                      # Original Arduino reference code
+├── PARAMETER_API.md              # Complete parameter API documentation
+├── CAN_INTEGRATION_REPORT.md     # CAN bus integration details
+├── CAN_MESSAGE_FORMAT.md         # CAN message specifications
+├── PROJECT_DOCUMENTATION.md      # Comprehensive project documentation
+└── QUICKSTART.md                 # Quick start guide
 ```
 
 ## Getting Started
@@ -289,7 +300,7 @@ See `CAN_INTEGRATION_REPORT.md` and `CAN_MESSAGE_FORMAT.md` for details.
 
 ### isoSPI Interface
 
-The project includes a PIO-based isoSPI interface:
+The project includes a PIO-based isoSPI interface with advanced features:
 
 - **Master Mode:** Transmit and receive differential Manchester-encoded data
 - **Snooper Mode:** Passive monitoring of existing isoSPI bus traffic
@@ -299,6 +310,10 @@ The project includes a PIO-based isoSPI interface:
   - **PIO2 SM0:** isoSPI master (active communication)
 - **Switchable:** Can switch between Batman SPI and isoSPI PIO at runtime
 - **Debug Output:** Capture and decode bus traffic
+- **RX Sampling Optimization:** Configurable sampling positions for Manchester decoding
+  - SAMPLE_POS_1: First sampling point (tested 5-16 cycles, all work; recommended test 2-20)
+  - SAMPLE_POS_2: Second sampling point (recommended test 18-26 cycles)
+  - See `src/isospi_master.pio` for detailed timing documentation
 
 **isoSPI Workflow:**
 1. `isospi init` - Initialize the PIO state machines
@@ -306,6 +321,12 @@ The project includes a PIO-based isoSPI interface:
 3. `bmb test` - Run test to communicate with BMBs
 4. `isospi snoop` - Display captured bus traffic
 5. `batman enable` - Switch back to Batman SPI (disables isoSPI)
+
+**RX Sampling Tuning:**
+- Use oscilloscope to verify Manchester signal quality
+- Adjust SAMPLE_POS_1 and SAMPLE_POS_2 in `isospi_master.pio`
+- Test with `bmb continuous on` to verify data decoding accuracy
+- Compare isoSPI decoded data with Batman SPI baseline
 
 ### Unified BMB Testing
 
@@ -342,28 +363,73 @@ Use the parameter API to build custom monitoring solutions.
 
 ## Documentation
 
+- **[Quick Start Guide](QUICKSTART.md)** - Get up and running quickly
 - **[Parameter API Guide](PARAMETER_API.md)** - Complete API reference
 - **[CAN Integration Report](CAN_INTEGRATION_REPORT.md)** - CAN bus implementation details
 - **[CAN Message Format](CAN_MESSAGE_FORMAT.md)** - CAN message specifications
 - **[ESPHome Setup](esphome-interface/README.md)** - Display interface guide
-- **[RP2350A Details](README_RP2350.md)** - Additional RP2350A-specific documentation
+- **[Project Documentation](PROJECT_DOCUMENTATION.md)** - Comprehensive system documentation
+- **[PIO Architecture](context/PIO_ARCHITECTURE.md)** - PIO state machine design
+- **[PIO Communication](context/PIO_STATE_MACHINE_COMMUNICATION.md)** - Inter-SM communication
 
 ## Development
 
 ### Building
 ```bash
-# RP2350A Firmware
+# RP2350A Firmware (Linux/macOS)
 mkdir build
 cd build
 cmake ..
 make
+
+# Or use the build script
+chmod +x build.sh
+./build.sh
 
 # ESPHome Display
 cd esphome-interface
 esphome compile tesla_bms_display.yaml
 ```
 
+**Windows Build:**
+```bash
+# Using Git Bash or PowerShell
+mkdir build
+cd build
+cmake ..
+cmake --build .
+
+# The .elf file will be created
+# Convert to .uf2 manually using:
+python ../bin2uf2.py build/tesla_bms_rp2350.elf build/tesla_bms_rp2350.uf2
+```
+
 ### Testing
+
+### Automated Test Framework
+The project includes a comprehensive Python-based test framework in the `tests/` directory:
+
+```bash
+# Run automated tests
+cd tests
+python test_framework.py
+```
+
+**Available Test Suites:**
+- `test_parameter_api.py` - Parameter system validation
+- `test_balance_control.py` - Cell balancing control tests
+- `test_bms_hardware.py` - Hardware interface testing
+- `test_as8510_sensor.py` - Current sensor tests
+- `diagnose_balancing.py` - Balancing diagnostic tool
+
+**Test Framework Features:**
+- Automated serial communication testing
+- Configurable test timeouts and retries
+- Detailed test reporting with JSON output
+- Support for both USB and hardware UART testing
+- Pattern matching and response validation
+
+### Manual Testing
 - Use logic analyzer captures in `scope-capture/` directory for debugging
 - Monitor USB serial for comprehensive system analysis
 - Test individual components using serial commands
@@ -399,6 +465,9 @@ esphome compile tesla_bms_display.yaml
 - Run `isospi status` to check initialization
 - Use `isospi snoop` to monitor bus traffic
 - Try `isospi test` to verify master functionality
+- Use oscilloscope to verify Manchester signal integrity
+- Tune RX sampling positions (SAMPLE_POS_1, SAMPLE_POS_2) if data decode errors occur
+- Compare decoded data with Batman SPI baseline using `snoop diag`
 
 ## Implementation Status
 
@@ -422,9 +491,11 @@ esphome compile tesla_bms_display.yaml
 ### 🚧 In Progress (Phase 3)
 - [x] BATMan/isoSPI interface switching
 - [x] Runtime interface control (automatic disable/enable)
+- [x] isoSPI RX sampling optimization (testing range: SAMPLE_POS_1: 2-20, SAMPLE_POS_2: 18-26)
+- [x] Automated test framework with Python scripts
 - [ ] Full BMS state machine
 - [ ] Cell voltage reading via isoSPI
-- [ ] Cell balancing control
+- [ ] Cell balancing control via isoSPI
 - [ ] Temperature monitoring
 
 ### 📋 Pending (Phases 4-6)
@@ -455,9 +526,12 @@ esphome compile tesla_bms_display.yaml
 
 ⚠️ **DEVELOPMENT STATUS**
 - This is a development version (v2.0.0)
-- isoSPI implementation is experimental
+- isoSPI implementation is experimental and currently being optimized
+- isoSPI RX sampling positions under active testing and tuning
 - BATMan protocol partially implemented
 - Extensive testing required before production use
+- Current focus: RX sampling optimization with oscilloscope validation
+- Automated test framework available for validation
 - **Use at your own risk**
 
 ## License
@@ -489,7 +563,10 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
   - Passive snooper mode for bus monitoring
   - Runtime switching between Batman SPI and isoSPI
   - Differential Manchester encoding/decoding
+  - Configurable RX sampling for optimal data decoding
+  - Debug output with `isospi snoop` and `snoop diag`
 - **Unified BMB Testing:** Single test interface for both Batman and isoSPI modes
+- **Automated Test Framework:** Python-based testing with serial communication validation
 - **INA228 Driver:** High-precision current, voltage, and power monitoring
 - **Coulomb Counter:** Accurate SOC tracking with INA228 integration
 - **ADC Monitor:** 4-channel pack voltage monitoring with voltage dividers
@@ -501,12 +578,16 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 - **Continuous Testing:** Automated BMB testing every 2 seconds
 - **Hardware Monitoring:** Real-time status for all peripherals
 - **Parameter System:** Enhanced with additional monitoring parameters
+- **Debug Diagnostics:** Extensive diagnostic commands (`snoop diag`, `isospi status`)
+- **Test Automation:** Python test framework for parameter API and hardware validation
 
 #### **Development Infrastructure**
 - **Build System:** Migrated to Pico SDK with CMake
 - **PIO Programming:** Custom PIO code for CAN and isoSPI
 - **C Implementation:** Pure C codebase (replaced C++ Arduino)
-- **Documentation:** Added CAN_INTEGRATION_REPORT.md and CAN_MESSAGE_FORMAT.md
+- **Documentation:** Added comprehensive technical documentation
+- **Test Framework:** Python-based automated testing infrastructure
+- **Build Scripts:** Cross-platform build support (Linux/macOS/Windows)
 
 ### Version 1.3.1 (January 2025)
 **New Feature: Exact Balance Cell Tracking**
@@ -578,11 +659,13 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ## References
 
+- [Hardware PCB Design](https://github.com/clowrey/isoSPI-M3Y-BMS-PCB) - Custom PCB for RP2350A BMS
 - [RP2350 Datasheet](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf)
 - [Pico SDK Documentation](https://www.raspberrypi.com/documentation/pico-sdk/)
 - [INA228 Datasheet](https://www.ti.com/product/INA228)
 - [can2040 Library](https://github.com/KevinOConnor/can2040)
 - [Original BATMan BMS](https://github.com/damienmaguire/Tesla-M3-Bms-Software)
+- [isoSnooper by jonny5532](https://github.com/jonny5532/isosnooper)
 
 ## Acknowledgments
 
