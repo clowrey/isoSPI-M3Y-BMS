@@ -343,8 +343,11 @@ static void batman_update_cell_voltages(void) {
     
     float cell_v_max = 0;
     float cell_v_min = 5000;
+    float cell_v_sum = 0;
+    float cell_v_avg = 0;
+    int valid_cells_found = 0;
     
-    while (h <= 100) {
+    while (h <= 100 && xr <= chip_num) {
         if (yc < 14) {  // Check actual measurement present
             if (voltage_array[xr][yc] > 10) {  // Check actual measurement present
                 if (cell_v_max < voltage_array[xr][yc]) {
@@ -357,9 +360,11 @@ static void batman_update_cell_voltages(void) {
                     min_cell = h;
                     param_set_int(PARAM_CELL_MIN, h + 1);
                 }
+                cell_v_sum += voltage_array[xr][yc];
                 param_set_float((param_num_t)(PARAM_U1 + h), (float)voltage_array[xr][yc]);
                 h++;  // next cell spot value along
                 hc++; // one more cell present
+                valid_cells_found++;
             }
             yc++;  // next cell along
         } else {
@@ -367,21 +372,25 @@ static void batman_update_cell_voltages(void) {
             hc = 0;   // reset cell count per chip
             xr++;     // next BMB
         }
+    }
+    
+    // Update parameters if we found any valid cells
+    if (valid_cells_found > 0) {
+        max_voltage = cell_v_max;
+        min_voltage = cell_v_min;
+        cells_present = h;
+        cell_v_avg = cell_v_sum / valid_cells_found;
         
-        if (xr == chip_num) {
-            max_voltage = cell_v_max;
-            min_voltage = cell_v_min;
-            cells_present = h;
-            
-            param_set_float(PARAM_UMAX, cell_v_max);
-            param_set_float(PARAM_UMIN, cell_v_min);
-            param_set_float(PARAM_DELTA_V, cell_v_max - cell_v_min);
-            param_set_int(PARAM_CELLS_PRESENT, h);
-            
-            printf("BATMan: Found %d cells, min=%d mV, max=%d mV\n", h, (int)cell_v_min, (int)cell_v_max);
-            h = 100;
-            break;
-        }
+        param_set_float(PARAM_UMAX, cell_v_max);
+        param_set_float(PARAM_UMIN, cell_v_min);
+        param_set_float(PARAM_DELTA_V, cell_v_max - cell_v_min);
+        param_set_float(PARAM_UAVG, cell_v_avg);
+        param_set_float(PARAM_UDC, cell_v_sum);  // Pack voltage = sum of all cells
+        param_set_float(PARAM_CELL_VOLTAGE_SUM, cell_v_sum);
+        param_set_int(PARAM_CELLS_PRESENT, h);
+        
+        printf("BATMan: Found %d cells, min=%d mV, max=%d mV, delta=%d mV, pack=%d mV\n", 
+               h, (int)cell_v_min, (int)cell_v_max, (int)(cell_v_max - cell_v_min), (int)cell_v_sum);
     }
 }
 
@@ -467,7 +476,7 @@ static void isospi_simple_test(void) {
     
     // Step 1: Wakeup with WAKEUP command (sends CS1 CS0 wakeup pattern + 0x2AD4)
     isospi_wakeup();
-    sleep_us(140); // CL - User tuned: 140us works
+    sleep_us(120); // CL - User tuned: 140us works
     
     // Step 2: Unmute with IDLE_WAKE command (0x21F2)
     isospi_send_command(CMD_IDLE_WAKE);
@@ -540,6 +549,7 @@ static void batman_state_machine(void) {
     switch (loop_state) {
         case 0:  // Run Batman SPI test
             batman_simple_test();
+            batman_update_cell_voltages();  // Calculate min/max/delta
             loop_state++;
             idle_count = 0;
             break;
@@ -554,6 +564,7 @@ static void batman_state_machine(void) {
             
         case 2:  // Run isoSPI Master test (PIO-based)
             isospi_simple_test();
+            batman_update_cell_voltages();  // Calculate min/max/delta
             loop_state++;
             idle_count = 0;
             break;

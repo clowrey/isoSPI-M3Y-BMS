@@ -131,9 +131,9 @@ bool isospi_write_read_blocking(unsigned char* out_buf, unsigned char* in_buf, s
         carry_bit = new_carry;
 
         // CL: Debug - print decoded byte for first few bytes
-        if(i < 24) {
-            printf("  decoded: 0x%02X\n", in_buf[i]);
-        }
+        // if(i < 24) {
+        //     printf("  decoded: 0x%02X\n", in_buf[i]);
+        // }
 
         sleep_us(1);
     }

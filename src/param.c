@@ -112,7 +112,9 @@ void param_init(void) {
         if (i == PARAM_BALANCE_CELL_LIST) {
             params[i].type = PARAM_TYPE_STRING;
             params[i].value.string_val[0] = '\0';
-        } else if (i >= PARAM_BATT_CONTACTOR_POS && i <= PARAM_CURRENT_EFFICIENCY) {
+        } else if ((i >= PARAM_UMAX && i <= PARAM_CELL_VMIN) || 
+                   (i >= PARAM_BATT_CONTACTOR_POS && i <= PARAM_CURRENT_EFFICIENCY)) {
+            // Voltage statistics and power parameters are FLOAT
             params[i].type = PARAM_TYPE_FLOAT;
             params[i].value.float_val = 0.0f;
         } else if (i >= PARAM_U1 && i <= PARAM_U108) {

@@ -212,7 +212,8 @@ psram:
 
 logger:
   level: INFO
-  hardware_uart: USB_SERIAL_JTAG
+  baud_rate: 0 #disable usb logging - using USB pins for serial coms to master
+  # hardware_uart: USB_SERIAL_JTAG
 
 wifi:
   ssid: !secret wifi_ssid
@@ -241,8 +242,8 @@ time:
 
 uart:
   id: tesla_bms_uart_uart
-  tx_pin: GPIO43
-  rx_pin: GPIO44
+  tx_pin: GPIO19   #CL was GPIO43
+  rx_pin: GPIO20   #CL was GPIO44
   baud_rate: 921600
   data_bits: 8
   parity: NONE

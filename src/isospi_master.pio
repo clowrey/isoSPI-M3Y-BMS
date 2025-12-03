@@ -41,10 +41,37 @@
 ; Data bit timing - each half-bit is a 100ns pulse:
 .define DATA_PULSE_LEN   15  ; 15 * 6.67ns = 100ns (pulse width per half-bit)
 
-; the reply sampling points (multiplied by 6.67ns @ 150MHz)
-; These define when to sample the incoming RX signals during reception
-.define SAMPLE_POS_1  6   ; First sample at 67ns into bit period (5-16 works) CL - DO NOT CHANGE THESE TIMINGS WITHOUT GOOD REASON
-.define SAMPLE_POS_2  22   ; Second sample at 167ns into bit period
+; CL: RX sampling positions (multiplied by 6.67ns @ 150MHz)
+; These define when to sample the incoming RX signals during Manchester bit reception
+; CRITICAL: These values determine data decoding accuracy and must be tested!
+;
+; Manchester encoding: each bit period has two transitions (high-low or low-high)
+; We take 2 samples per bit to determine if it's a '1' (high-low) or '0' (low-high)
+;
+; SAMPLE_POS_1: First sample point timing
+;   - Current value: 6 cycles = 40ns into bit period
+;   - Tested range: 5-16 cycles (33ns - 107ns) - ALL WORKED
+;   - Recommended: Test wider range (2-20 cycles) to find optimal margins
+;   - Too early: May catch previous bit transition
+;   - Too late: May miss first half-bit state
+;
+; SAMPLE_POS_2: Second sample point timing  
+;   - Current value: 22 cycles = 147ns into bit period
+;   - Should be tested: 18-26 cycles (120ns - 173ns)
+;   - Must be after mid-bit transition (~100ns) but before bit end (~200ns)
+;   - Too early: May sample during mid-bit transition (unreliable)
+;   - Too late: May catch next bit's transition
+;
+; Testing procedure:
+;   1. Start with current values (6, 22)
+;   2. Test SAMPLE_POS_1: Try values 2, 4, 6, 8, 10, 12, 14, 16, 18, 20
+;   3. Test SAMPLE_POS_2: Try values 18, 20, 22, 24, 26, 28
+;   4. Verify decoded data matches BATMan SPI for all combinations that work
+;   5. Document the working range for each parameter
+;   6. Choose mid-point of working range for maximum noise immunity
+;
+.define SAMPLE_POS_1  8   ; First sample at 40ns into bit period (tested: 5-16 work, test wider: 2-20)
+.define SAMPLE_POS_2  22   ; Second sample at 147ns into bit period (test range: 18-26)
 
 ; how long to wait for the reply (multiplied by 20ns)
 ; (Timer is managed by wait_for_gap state machine)

@@ -25,7 +25,7 @@ This ESPHome project creates a touchscreen display interface for the Tesla Model
 ### UART Connection (Tesla BMS)
 - **TX**: GPIO43
 - **RX**: GPIO44
-- **Baud Rate**: 115200
+- **Baud Rate**: 921600
 
 ### QSPI LCD Display (JC4832W535)
 - **CLK**: GPIO47
@@ -236,7 +236,7 @@ System parameters are requested separately with minimal delays.
 
 3. **No Serial Communication**:
    - Verify UART pins (TX: GPIO43, RX: GPIO44)
-   - Check baud rate (115200)
+   - Check baud rate (921600)
    - Ensure Tesla BMS is powered and responding
 
 4. **WiFi Connection Issues**:
